@@ -1,0 +1,35 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath('com.android.tools.build:gradle')
+    classpath('com.facebook.react:react-native-gradle-plugin')
+    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+  }
+  // Override the AGP version supplied by the React Native version catalog
+  // with 8.13.2. Forcing here wins over the catalog and survives
+  // node_modules reinstalls.
+  // NOTE: AGP 9.x is NOT compatible with the RN 0.85 / Expo 56 Gradle plugins
+  // (@react-native/gradle-plugin fails to compile against AGP 9 APIs).
+  // 8.13.2 is the highest working version for this stack.
+  configurations.classpath {
+    resolutionStrategy {
+      force 'com.android.tools.build:gradle:8.13.2'
+    }
+  }
+}
+
+allprojects {
+  repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://www.jitpack.io' }
+  }
+}
+
+apply plugin: "expo-root-project"
+apply plugin: "com.facebook.react.rootproject"
