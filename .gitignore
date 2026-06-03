@@ -47,4 +47,9 @@ android/build/
 android/app/build/
 android/local.properties
 android/keystore.properties
-*.keystore
+# Only the private release keystore is secret. The debug keystore is the
+# standard public Android debug key and SHOULD be committed (CI debug-signing).
+*-release.keystore
+
+# Claude Code local artifacts
+.claude/
