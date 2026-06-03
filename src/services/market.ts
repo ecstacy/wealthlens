@@ -1,5 +1,5 @@
 import { getDatabase } from '../db/database';
-import type { Currency, MarketCache, ExchangeRate } from '../types';
+import type { Currency, MarketCache, ExchangeRate, Holding } from '../types';
 
 const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart';
 const MF_API_BASE = 'https://api.mfapi.in/mf';
@@ -7,12 +7,16 @@ const EXCHANGE_RATE_BASE = 'https://open.er-api.com/v6/latest';
 
 const CACHE_TTL_MS = 15 * 60 * 1000;
 
-export async function fetchStockPrice(symbol: string): Promise<MarketCache | null> {
-  const cached = await getCachedPrice(symbol);
-  if (cached) return cached;
+export async function fetchStockPrice(symbol: string, force = false): Promise<MarketCache | null> {
+  if (!force) {
+    const cached = await getCachedPrice(symbol);
+    if (cached) return cached;
+  }
 
   try {
-    const res = await fetch(`${YAHOO_BASE}/${encodeURIComponent(symbol)}?interval=1d&range=1d`);
+    const res = await fetch(`${YAHOO_BASE}/${encodeURIComponent(symbol)}?interval=1d&range=1d`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
     const data = await res.json();
     const result = data.chart?.result?.[0];
     if (!result) return null;
@@ -38,10 +42,12 @@ export async function fetchStockPrice(symbol: string): Promise<MarketCache | nul
   }
 }
 
-export async function fetchMutualFundNAV(schemeCode: string): Promise<MarketCache | null> {
+export async function fetchMutualFundNAV(schemeCode: string, force = false): Promise<MarketCache | null> {
   const cacheKey = `MF_${schemeCode}`;
-  const cached = await getCachedPrice(cacheKey);
-  if (cached) return cached;
+  if (!force) {
+    const cached = await getCachedPrice(cacheKey);
+    if (cached) return cached;
+  }
 
   try {
     const res = await fetch(`${MF_API_BASE}/${schemeCode}`);
@@ -124,11 +130,78 @@ async function cachePrice(entry: MarketCache) {
   );
 }
 
-export async function refreshAllPrices(holdings: { symbol: string | null; asset_type: string }[]) {
+export async function refreshAllPrices(
+  holdings: { symbol: string | null; asset_type: string }[],
+  force = false
+) {
   const promises = holdings.map((h) => {
     if (!h.symbol) return null;
-    if (h.asset_type === 'mutual_fund') return fetchMutualFundNAV(h.symbol);
-    return fetchStockPrice(h.symbol);
+    if (h.asset_type === 'mutual_fund') return fetchMutualFundNAV(h.symbol, force);
+    return fetchStockPrice(h.symbol, force);
   });
   await Promise.allSettled(promises.filter(Boolean) as Promise<MarketCache | null>[]);
+}
+
+export interface EnrichedHolding extends Holding {
+  current_price?: number;
+  current_value: number; // in base currency
+  invested_value: number; // in base currency
+  gain_loss: number; // in base currency
+  gain_loss_pct: number;
+  change_pct?: number; // day change from market data
+  is_live: boolean;
+}
+
+/**
+ * Fetch live prices for all holdings and compute current value, invested
+ * value, and gain/loss — all converted to the base currency (default INR).
+ * Holdings without a tradable symbol (FD/PPF/cash, etc.) fall back to their
+ * entered avg_price (not "live").
+ */
+export async function enrichHoldings(
+  holdings: Holding[],
+  baseCurrency: Currency = 'INR',
+  force = false
+): Promise<EnrichedHolding[]> {
+  return Promise.all(
+    holdings.map(async (h) => {
+      let currentPrice: number | undefined;
+      let priceCurrency: Currency = h.currency;
+      let changePct: number | undefined;
+      let isLive = false;
+
+      if (h.symbol) {
+        const quote =
+          h.asset_type === 'mutual_fund'
+            ? await fetchMutualFundNAV(h.symbol, force)
+            : await fetchStockPrice(h.symbol, force);
+        if (quote && quote.price > 0) {
+          currentPrice = quote.price;
+          priceCurrency = (quote.currency as Currency) || h.currency;
+          changePct = quote.change_pct;
+          isLive = true;
+        }
+      }
+
+      const effectivePrice = currentPrice ?? h.avg_price;
+      const currentNative = effectivePrice * h.quantity;
+      const investedNative = h.avg_price * h.quantity;
+
+      const currentValue = await convertToBase(currentNative, priceCurrency, baseCurrency);
+      const investedValue = await convertToBase(investedNative, h.currency, baseCurrency);
+      const gainLoss = currentValue - investedValue;
+      const gainLossPct = investedValue > 0 ? (gainLoss / investedValue) * 100 : 0;
+
+      return {
+        ...h,
+        current_price: currentPrice,
+        current_value: currentValue,
+        invested_value: investedValue,
+        gain_loss: gainLoss,
+        gain_loss_pct: gainLossPct,
+        change_pct: changePct,
+        is_live: isLive,
+      };
+    })
+  );
 }
