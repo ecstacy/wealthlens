@@ -4,10 +4,13 @@ import { Text, Card, FAB, useTheme, Chip, Divider, SegmentedButtons } from 'reac
 import { BarChart } from 'react-native-gifted-charts';
 import { getDatabase } from '../../src/db/database';
 import { expenseCategories } from '../../src/theme';
+import { useMoney } from '../../src/hooks/useMoney';
+import MoneyControls from '../../src/components/MoneyControls';
 import type { Expense } from '../../src/types';
 
 export default function ExpensesScreen() {
   const theme = useTheme();
+  const { fmt, fmtNum, convert } = useMoney();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [period, setPeriod] = useState('month');
@@ -41,12 +44,12 @@ export default function ExpensesScreen() {
     setRefreshing(false);
   };
 
-  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalExpenses = expenses.reduce((sum, e) => sum + convert(e.amount, e.currency), 0);
 
   const categoryTotals = React.useMemo(() => {
     const totals: Record<string, number> = {};
     expenses.forEach((e) => {
-      totals[e.category] = (totals[e.category] || 0) + e.amount;
+      totals[e.category] = (totals[e.category] || 0) + convert(e.amount, e.currency);
     });
     return Object.entries(totals)
       .sort((a, b) => b[1] - a[1])
@@ -57,9 +60,6 @@ export default function ExpensesScreen() {
       }));
   }, [expenses]);
 
-  const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
-
   const formatDate = (date: string) =>
     new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
@@ -69,11 +69,12 @@ export default function ExpensesScreen() {
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
       >
+        <MoneyControls />
         <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
           <Card.Content>
             <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>Total Spending</Text>
             <Text variant="headlineLarge" style={{ color: theme.colors.error, fontWeight: '700' }}>
-              {formatCurrency(totalExpenses)}
+              {fmtNum(totalExpenses)}
             </Text>
           </Card.Content>
         </Card>
@@ -123,7 +124,7 @@ export default function ExpensesScreen() {
                       <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{e.category}</Text>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
-                      <Text variant="bodyLarge" style={{ color: theme.colors.error }}>{formatCurrency(e.amount)}</Text>
+                      <Text variant="bodyLarge" style={{ color: theme.colors.error }}>{fmt(e.amount, e.currency)}</Text>
                       <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{formatDate(e.date)}</Text>
                     </View>
                   </View>

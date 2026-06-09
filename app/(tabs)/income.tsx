@@ -2,10 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { Text, Card, FAB, useTheme, Chip, Divider, SegmentedButtons } from 'react-native-paper';
 import { getDatabase } from '../../src/db/database';
+import { useMoney } from '../../src/hooks/useMoney';
+import MoneyControls from '../../src/components/MoneyControls';
 import type { Income } from '../../src/types';
 
 export default function IncomeScreen() {
   const theme = useTheme();
+  const { fmt, fmtNum, convert } = useMoney();
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState('all');
@@ -31,13 +34,10 @@ export default function IncomeScreen() {
     setRefreshing(false);
   };
 
-  const totalIncome = incomes.reduce((sum, i) => sum + i.amount, 0);
+  const totalIncome = incomes.reduce((sum, i) => sum + convert(i.amount, i.currency), 0);
   const monthlyRecurring = incomes
     .filter((i) => i.is_recurring && i.frequency === 'monthly')
-    .reduce((sum, i) => sum + i.amount, 0);
-
-  const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+    .reduce((sum, i) => sum + convert(i.amount, i.currency), 0);
 
   const formatDate = (date: string) => new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -47,12 +47,13 @@ export default function IncomeScreen() {
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
       >
+        <MoneyControls />
         <View style={styles.summaryRow}>
           <Card style={[styles.summaryCard, { backgroundColor: theme.colors.surface }]}>
             <Card.Content>
               <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Total Income</Text>
               <Text variant="titleLarge" style={{ color: theme.colors.secondary, fontWeight: '700' }}>
-                {formatCurrency(totalIncome)}
+                {fmtNum(totalIncome)}
               </Text>
             </Card.Content>
           </Card>
@@ -60,7 +61,7 @@ export default function IncomeScreen() {
             <Card.Content>
               <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Monthly Recurring</Text>
               <Text variant="titleLarge" style={{ color: theme.colors.primary, fontWeight: '700' }}>
-                {formatCurrency(monthlyRecurring)}
+                {fmtNum(monthlyRecurring)}
               </Text>
             </Card.Content>
           </Card>
@@ -96,7 +97,7 @@ export default function IncomeScreen() {
                       </View>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
-                      <Text variant="bodyLarge" style={{ color: theme.colors.secondary }}>{formatCurrency(inc.amount)}</Text>
+                      <Text variant="bodyLarge" style={{ color: theme.colors.secondary }}>{fmt(inc.amount, inc.currency)}</Text>
                       <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{formatDate(inc.date)}</Text>
                     </View>
                   </View>

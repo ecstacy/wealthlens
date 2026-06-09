@@ -2,10 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { Text, Card, FAB, useTheme, ProgressBar, Chip } from 'react-native-paper';
 import { getDatabase } from '../../src/db/database';
+import { useMoney } from '../../src/hooks/useMoney';
+import MoneyControls from '../../src/components/MoneyControls';
 import type { Goal } from '../../src/types';
 
 export default function GoalsScreen() {
   const theme = useTheme();
+  const { fmt } = useMoney();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -25,9 +28,6 @@ export default function GoalsScreen() {
     setRefreshing(false);
   };
 
-  const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
-
   const daysUntil = (date: string) => {
     const diff = new Date(date).getTime() - Date.now();
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
@@ -42,6 +42,7 @@ export default function GoalsScreen() {
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
       >
+        <MoneyControls />
         {goals.length === 0 ? (
           <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
             <Card.Content style={{ alignItems: 'center', paddingVertical: 40 }}>
@@ -66,7 +67,7 @@ export default function GoalsScreen() {
 
                   <View style={styles.goalAmounts}>
                     <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                      {formatCurrency(g.current_amount || 0)} of {formatCurrency(g.target_amount)}
+                      {fmt(g.current_amount || 0, g.currency)} of {fmt(g.target_amount, g.currency)}
                     </Text>
                     <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
                       {daysUntil(g.target_date)} days left
