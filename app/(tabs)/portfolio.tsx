@@ -121,6 +121,15 @@ export default function PortfolioScreen() {
       .map(([k, v], i) => ({ value: v, color: countryPalette[i % countryPalette.length], text: k, label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
   }, [holdings, totalValue]);
 
+  const currencyColors: Record<string, string> = { INR: '#FF9933', EUR: '#003399', USD: '#22c55e', GBP: '#B07CFF' };
+  const currencyData = React.useMemo(() => {
+    const by: Record<string, number> = {};
+    holdings.forEach((h) => { by[h.currency] = (by[h.currency] || 0) + h.current_value; });
+    return Object.entries(by)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => ({ value: v, color: currencyColors[k] || '#9BA3B5', text: k, label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
+  }, [holdings, totalValue]);
+
   const trend = React.useMemo(
     () => snapshots.map((s) => ({ value: s.value_inr * displayRate })),
     [snapshots, displayRate]
@@ -233,6 +242,25 @@ export default function PortfolioScreen() {
                 <PieChart data={countryData} radius={70} innerRadius={45} innerCircleColor={theme.colors.surface} />
                 <View style={styles.legendCol}>
                   {countryData.map((d) => (
+                    <View key={d.text} style={styles.legendItem}>
+                      <View style={[styles.legendDot, { backgroundColor: d.color }]} />
+                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{d.label}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            </Card.Content>
+          </Card>
+        )}
+
+        {currencyData.length > 0 && (
+          <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+            <Card.Content>
+              <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 16 }}>Currency Split</Text>
+              <View style={styles.chartRow}>
+                <PieChart data={currencyData} radius={70} innerRadius={45} innerCircleColor={theme.colors.surface} />
+                <View style={styles.legendCol}>
+                  {currencyData.map((d) => (
                     <View key={d.text} style={styles.legendItem}>
                       <View style={[styles.legendDot, { backgroundColor: d.color }]} />
                       <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{d.label}</Text>
