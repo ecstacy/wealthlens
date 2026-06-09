@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, ScrollView, StyleSheet, RefreshControl } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, ScrollView, StyleSheet, RefreshControl, Pressable } from 'react-native';
 import { Text, Card, FAB, useTheme, Chip, Divider, SegmentedButtons } from 'react-native-paper';
+import { router, useFocusEffect } from 'expo-router';
 import { getDatabase } from '../../src/db/database';
 import { useMoney } from '../../src/hooks/useMoney';
 import MoneyControls from '../../src/components/MoneyControls';
@@ -12,21 +13,16 @@ export default function IncomeScreen() {
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState('all');
-  const [showForm, setShowForm] = useState(false);
 
   const loadData = useCallback(async () => {
     const db = await getDatabase();
-    let query = 'SELECT * FROM income ORDER BY date DESC';
-    if (filter !== 'all') {
-      query = `SELECT * FROM income WHERE category = '${filter}' ORDER BY date DESC`;
-    }
-    const rows = await db.getAllAsync<Income>(query);
+    const rows = filter === 'all'
+      ? await db.getAllAsync<Income>('SELECT * FROM income ORDER BY date DESC')
+      : await db.getAllAsync<Income>('SELECT * FROM income WHERE category = ? ORDER BY date DESC', filter);
     setIncomes(rows);
   }, [filter]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -87,7 +83,7 @@ export default function IncomeScreen() {
               <Text style={{ color: theme.colors.onSurfaceVariant }}>No income entries yet. Tap + to add.</Text>
             ) : (
               incomes.map((inc) => (
-                <View key={inc.id}>
+                <Pressable key={inc.id} onPress={() => router.push(`/add-income?id=${inc.id}`)}>
                   <View style={styles.row}>
                     <View style={{ flex: 1 }}>
                       <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }}>{inc.source}</Text>
@@ -102,7 +98,7 @@ export default function IncomeScreen() {
                     </View>
                   </View>
                   <Divider style={{ backgroundColor: theme.colors.outline, marginVertical: 8 }} />
-                </View>
+                </Pressable>
               ))
             )}
           </Card.Content>
@@ -115,7 +111,7 @@ export default function IncomeScreen() {
         icon="plus"
         style={[styles.fab, { backgroundColor: theme.colors.secondary }]}
         color={theme.colors.onPrimary}
-        onPress={() => setShowForm(true)}
+        onPress={() => router.push('/add-income')}
       />
     </View>
   );

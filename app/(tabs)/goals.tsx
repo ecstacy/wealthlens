@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { Text, Card, FAB, useTheme, ProgressBar, Chip } from 'react-native-paper';
+import { router, useFocusEffect } from 'expo-router';
 import { getDatabase } from '../../src/db/database';
+import { enrichHoldings, fetchExchangeRate } from '../../src/services/market';
 import { useMoney } from '../../src/hooks/useMoney';
 import MoneyControls from '../../src/components/MoneyControls';
-import type { Goal } from '../../src/types';
+import type { Goal, Holding } from '../../src/types';
 
 export default function GoalsScreen() {
   const theme = useTheme();
@@ -14,13 +16,27 @@ export default function GoalsScreen() {
 
   const loadData = useCallback(async () => {
     const db = await getDatabase();
-    const rows = await db.getAllAsync<Goal>('SELECT * FROM goals ORDER BY priority, target_date');
-    setGoals(rows);
+    const goalRows = await db.getAllAsync<Goal>('SELECT * FROM goals ORDER BY priority, target_date');
+
+    // Live progress: sum the current value of linked holdings (in INR), then
+    // convert to each goal's currency.
+    const holdingRows = await db.getAllAsync<Holding>('SELECT * FROM holdings');
+    const enriched = await enrichHoldings(holdingRows, 'INR');
+    const valById = new Map(enriched.map((h) => [h.id, h.current_value]));
+    const allocs = await db.getAllAsync<{ goal_id: number; holding_id: number; percentage: number }>('SELECT * FROM goal_allocations');
+
+    const withProgress = await Promise.all(
+      goalRows.map(async (g) => {
+        const linked = allocs.filter((a) => a.goal_id === g.id);
+        const sumInr = linked.reduce((s, a) => s + (valById.get(a.holding_id) ?? 0) * (a.percentage / 100), 0);
+        const rate = g.currency === 'INR' ? 1 : await fetchExchangeRate('INR', g.currency);
+        return { ...g, current_amount: sumInr * rate };
+      })
+    );
+    setGoals(withProgress);
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -58,7 +74,7 @@ export default function GoalsScreen() {
           goals.map((g) => {
             const progress = (g.current_amount || 0) / g.target_amount;
             return (
-              <Card key={g.id} style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+              <Card key={g.id} style={[styles.card, { backgroundColor: theme.colors.surface }]} onPress={() => router.push(`/add-goal?id=${g.id}`)}>
                 <Card.Content>
                   <View style={styles.goalHeader}>
                     <Text variant="titleMedium" style={{ color: theme.colors.onSurface, flex: 1 }}>{g.name}</Text>
@@ -96,7 +112,7 @@ export default function GoalsScreen() {
         icon="plus"
         style={[styles.fab, { backgroundColor: theme.colors.tertiary }]}
         color="#000"
-        onPress={() => {}}
+        onPress={() => router.push('/add-goal')}
       />
     </View>
   );

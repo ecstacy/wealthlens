@@ -251,13 +251,13 @@ export default function PortfolioScreen() {
               <>
                 <Text variant="bodyMedium" style={{ color: theme.colors.primary, marginTop: 4, marginBottom: 8 }}>≈ {fmt(monthlyCommitment)}/month committed</Text>
                 {sips.map((s) => (
-                  <View key={s.id} style={styles.holdingRow}>
+                  <Pressable key={s.id} onPress={() => router.push(`/add-sip?id=${s.id}`)} style={styles.holdingRow}>
                     <View style={{ flex: 1 }}>
                       <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }} numberOfLines={1}>{s.holding_name}</Text>
                       <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{s.frequency} · next {s.next_date}</Text>
                     </View>
                     <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>{fmt(s.amount)}</Text>
-                  </View>
+                  </Pressable>
                 ))}
               </>
             )}

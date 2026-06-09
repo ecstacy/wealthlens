@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, ScrollView, StyleSheet, RefreshControl } from 'react-native';
-import { Text, Card, FAB, useTheme, Chip, Divider, SegmentedButtons } from 'react-native-paper';
+import React, { useState, useCallback } from 'react';
+import { View, ScrollView, StyleSheet, RefreshControl, Pressable } from 'react-native';
+import { Text, Card, FAB, useTheme, Divider, SegmentedButtons } from 'react-native-paper';
 import { BarChart } from 'react-native-gifted-charts';
+import { router, useFocusEffect } from 'expo-router';
 import { getDatabase } from '../../src/db/database';
 import { expenseCategories } from '../../src/theme';
 import { useMoney } from '../../src/hooks/useMoney';
@@ -34,9 +35,7 @@ export default function ExpensesScreen() {
     setExpenses(rows);
   }, [period]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -116,7 +115,7 @@ export default function ExpensesScreen() {
               <Text style={{ color: theme.colors.onSurfaceVariant }}>No expenses recorded. Tap + to add.</Text>
             ) : (
               expenses.map((e) => (
-                <View key={e.id}>
+                <Pressable key={e.id} onPress={() => router.push(`/add-expense?id=${e.id}`)}>
                   <View style={styles.row}>
                     <View style={[styles.catDot, { backgroundColor: expenseCategories[e.category] || '#999' }]} />
                     <View style={{ flex: 1 }}>
@@ -129,7 +128,7 @@ export default function ExpensesScreen() {
                     </View>
                   </View>
                   <Divider style={{ backgroundColor: theme.colors.outline, marginVertical: 8 }} />
-                </View>
+                </Pressable>
               ))
             )}
           </Card.Content>
@@ -142,7 +141,7 @@ export default function ExpensesScreen() {
         icon="plus"
         style={[styles.fab, { backgroundColor: theme.colors.error }]}
         color="#fff"
-        onPress={() => {}}
+        onPress={() => router.push('/add-expense')}
       />
     </View>
   );
