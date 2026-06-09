@@ -1,11 +1,15 @@
 import React, { useState, useCallback } from 'react';
 import { View, ScrollView, StyleSheet, RefreshControl, Pressable } from 'react-native';
 import { Text, Card, FAB, useTheme, Chip, Divider, SegmentedButtons } from 'react-native-paper';
+import { BarChart } from 'react-native-gifted-charts';
 import { router, useFocusEffect } from 'expo-router';
 import { getDatabase } from '../../src/db/database';
+import { enrichHoldings } from '../../src/services/market';
 import { useMoney } from '../../src/hooks/useMoney';
 import MoneyControls from '../../src/components/MoneyControls';
-import type { Income, Expense } from '../../src/types';
+import type { Income, Expense, Holding } from '../../src/types';
+
+interface MonthStat { key: string; label: string; income: number; expenses: number; rate: number; }
 
 export default function IncomeScreen() {
   const theme = useTheme();
@@ -13,6 +17,8 @@ export default function IncomeScreen() {
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [monthIncome, setMonthIncome] = useState(0);
   const [monthExpenses, setMonthExpenses] = useState(0);
+  const [monthlyStats, setMonthlyStats] = useState<MonthStat[]>([]);
+  const [emergency, setEmergency] = useState<{ liquid: number; avgMonthly: number; months: number } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState('all');
 
@@ -23,13 +29,41 @@ export default function IncomeScreen() {
       : await db.getAllAsync<Income>('SELECT * FROM income WHERE category = ? ORDER BY date DESC', filter);
     setIncomes(rows);
 
-    // This-month cashflow (all categories, regardless of filter).
+    // ----- Cashflow over the last 6 months (all categories) -----
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    const incRows = await db.getAllAsync<Income>('SELECT amount, currency FROM income WHERE date >= ?', monthStart);
-    const expRows = await db.getAllAsync<Expense>('SELECT amount, currency FROM expenses WHERE date >= ?', monthStart);
-    setMonthIncome(incRows.reduce((s, i) => s + convert(i.amount, i.currency), 0));
-    setMonthExpenses(expRows.reduce((s, e) => s + convert(e.amount, e.currency), 0));
+    const sixAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1).toISOString().slice(0, 10);
+    const incAll = await db.getAllAsync<Income & { date: string }>('SELECT amount, currency, date FROM income WHERE date >= ?', sixAgo);
+    const expAll = await db.getAllAsync<Expense & { date: string }>('SELECT amount, currency, date FROM expenses WHERE date >= ?', sixAgo);
+
+    const buckets: Record<string, { income: number; expenses: number }> = {};
+    const keys: { key: string; label: string }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      buckets[key] = { income: 0, expenses: 0 };
+      keys.push({ key, label: d.toLocaleDateString('en-US', { month: 'short' }) });
+    }
+    incAll.forEach((r) => { const k = r.date.slice(0, 7); if (buckets[k]) buckets[k].income += convert(r.amount, r.currency); });
+    expAll.forEach((r) => { const k = r.date.slice(0, 7); if (buckets[k]) buckets[k].expenses += convert(r.amount, r.currency); });
+
+    const stats: MonthStat[] = keys.map(({ key, label }) => {
+      const b = buckets[key];
+      return { key, label, income: b.income, expenses: b.expenses, rate: b.income > 0 ? ((b.income - b.expenses) / b.income) * 100 : 0 };
+    });
+    setMonthlyStats(stats);
+
+    const current = stats[stats.length - 1];
+    setMonthIncome(current.income);
+    setMonthExpenses(current.expenses);
+
+    // ----- Emergency fund: liquid (cash + debt) vs avg monthly expenses -----
+    const holdings = await db.getAllAsync<Holding>('SELECT * FROM holdings');
+    const enriched = await enrichHoldings(holdings, 'INR');
+    const liquidInr = enriched.filter((h) => h.asset_class === 'cash' || h.asset_class === 'debt').reduce((s, h) => s + h.current_value, 0);
+    const monthsWithSpend = stats.filter((s) => s.expenses > 0);
+    const recent = monthsWithSpend.slice(-3);
+    const avgMonthly = recent.length ? recent.reduce((s, m) => s + m.expenses, 0) / recent.length : 0;
+    setEmergency(avgMonthly > 0 ? { liquid: liquidInr, avgMonthly, months: liquidInr / avgMonthly } : { liquid: liquidInr, avgMonthly: 0, months: 0 });
   }, [filter, convert]);
 
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
@@ -100,6 +134,60 @@ export default function IncomeScreen() {
             </Text>
           </Card.Content>
         </Card>
+
+        {/* Savings-rate trend */}
+        {monthlyStats.some((m) => m.income > 0 || m.expenses > 0) && (
+          <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+            <Card.Content>
+              <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 12 }}>Savings Rate — last 6 months</Text>
+              <BarChart
+                data={monthlyStats.map((m) => ({
+                  value: Math.round(m.rate),
+                  label: m.label,
+                  frontColor: m.rate >= 0 ? '#22c55e' : '#ef4444',
+                }))}
+                barWidth={26}
+                spacing={14}
+                roundedTop
+                noOfSections={3}
+                yAxisLabelSuffix="%"
+                yAxisTextStyle={{ color: theme.colors.onSurfaceVariant, fontSize: 10 }}
+                xAxisLabelTextStyle={{ color: theme.colors.onSurfaceVariant, fontSize: 10 }}
+                hideRules
+                backgroundColor={theme.colors.surface}
+                height={120}
+              />
+            </Card.Content>
+          </Card>
+        )}
+
+        {/* Emergency fund check */}
+        {emergency && (() => {
+          const m = emergency.months;
+          const color = emergency.avgMonthly === 0 ? theme.colors.onSurfaceVariant : m >= 6 ? '#22c55e' : m >= 3 ? theme.colors.tertiary : '#ef4444';
+          const status = emergency.avgMonthly === 0 ? 'Add expenses to assess' : m >= 6 ? 'Well covered' : m >= 3 ? 'Adequate — aim for 6 months' : 'Low — build your buffer';
+          return (
+            <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+              <Card.Content>
+                <Text variant="titleMedium" style={{ color: theme.colors.onSurface }}>Emergency Fund</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 6 }}>
+                  <Text variant="displaySmall" style={{ color, fontWeight: '800' }}>
+                    {emergency.avgMonthly > 0 ? m.toFixed(1) : '—'}
+                  </Text>
+                  <Text variant="titleMedium" style={{ color: theme.colors.onSurfaceVariant }}>months covered</Text>
+                </View>
+                <Text variant="bodySmall" style={{ color, marginTop: 2 }}>{status}</Text>
+                <View style={{ height: 8, borderRadius: 4, backgroundColor: theme.colors.surfaceVariant, marginTop: 12, overflow: 'hidden' }}>
+                  <View style={{ width: `${Math.min((m / 6) * 100, 100)}%`, height: 8, backgroundColor: color }} />
+                </View>
+                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }}>
+                  Liquid (cash + debt): {fmtNum(emergency.liquid)}
+                  {emergency.avgMonthly > 0 ? `  ·  avg spend ${fmtNum(emergency.avgMonthly)}/mo` : ''}
+                </Text>
+              </Card.Content>
+            </Card>
+          );
+        })()}
 
         <View style={styles.summaryRow}>
           <Card style={[styles.summaryCard, { backgroundColor: theme.colors.surface }]}>
