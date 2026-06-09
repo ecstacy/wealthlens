@@ -109,10 +109,16 @@ export default function PortfolioScreen() {
     return Object.entries(by).map(([k, v]) => ({ value: v, color: chartColors[k as AssetClass] || '#999', text: k, label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
   }, [holdings, totalValue]);
 
-  const geoData = React.useMemo(() => {
+  const countryPalette = ['#6C9CFF', '#FF9933', '#4ECDC4', '#FFD93D', '#FF6B9D', '#B07CFF', '#003399', '#22c55e', '#ef4444', '#9BA3B5'];
+  const countryData = React.useMemo(() => {
     const by: Record<string, number> = {};
-    holdings.forEach((h) => { by[h.geography] = (by[h.geography] || 0) + h.current_value; });
-    return Object.entries(by).map(([k, v]) => ({ value: v, color: chartColors[k as keyof typeof chartColors] || '#999', text: k, label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
+    holdings.forEach((h) => {
+      const key = h.country || h.geography; // precise country, falling back to region
+      by[key] = (by[key] || 0) + h.current_value;
+    });
+    return Object.entries(by)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v], i) => ({ value: v, color: countryPalette[i % countryPalette.length], text: k, label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
   }, [holdings, totalValue]);
 
   const trend = React.useMemo(
@@ -219,14 +225,14 @@ export default function PortfolioScreen() {
           </Card>
         )}
 
-        {geoData.length > 0 && (
+        {countryData.length > 0 && (
           <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
             <Card.Content>
-              <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 16 }}>Geography Split</Text>
+              <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 16 }}>Country Split</Text>
               <View style={styles.chartRow}>
-                <PieChart data={geoData} radius={70} innerRadius={45} innerCircleColor={theme.colors.surface} />
+                <PieChart data={countryData} radius={70} innerRadius={45} innerCircleColor={theme.colors.surface} />
                 <View style={styles.legendCol}>
-                  {geoData.map((d) => (
+                  {countryData.map((d) => (
                     <View key={d.text} style={styles.legendItem}>
                       <View style={[styles.legendDot, { backgroundColor: d.color }]} />
                       <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{d.label}</Text>
