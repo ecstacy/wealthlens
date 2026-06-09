@@ -115,6 +115,19 @@ export default function InsightsScreen() {
           </Card.Content>
         </Card>
 
+        <Card style={[styles.card, { backgroundColor: theme.colors.surface }]} onPress={() => router.push('/tax-summary')}>
+          <Card.Content>
+            <View style={styles.cardHeader}>
+              <Ionicons name="receipt-outline" size={24} color={theme.colors.tertiary} />
+              <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginLeft: 12, flex: 1 }}>Year-End Tax Summary</Text>
+              <Ionicons name="chevron-forward" size={20} color={theme.colors.onSurfaceVariant} />
+            </View>
+            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }}>
+              Estimated capital-gains tax (LTCG/STCG) if you sold today, computed on-device — no API key needed.
+            </Text>
+          </Card.Content>
+        </Card>
+
         {insightCards.map((card) => (
           <Card key={card.key} style={[styles.card, { backgroundColor: theme.colors.surface }]}>
             <Card.Content>

@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { View, ScrollView, StyleSheet, RefreshControl, Pressable } from 'react-native';
 import { Text, Card, FAB, useTheme, Chip, Divider, IconButton, Menu, Button } from 'react-native-paper';
-import { PieChart, LineChart } from 'react-native-gifted-charts';
+import { LineChart } from 'react-native-gifted-charts';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
@@ -9,7 +9,8 @@ import { getDatabase } from '../../src/db/database';
 import { enrichHoldings, fetchExchangeRate, type EnrichedHolding } from '../../src/services/market';
 import { recordSnapshot, getSnapshots, type Snapshot } from '../../src/services/snapshots';
 import { useSettingsStore } from '../../src/stores/settingsStore';
-import { chartColors } from '../../src/theme';
+import { chartColors, vibrantPalette } from '../../src/theme';
+import DonutChart from '../../src/components/DonutChart';
 import type { Holding, AssetClass, Currency } from '../../src/types';
 
 interface ActiveSip {
@@ -114,7 +115,14 @@ export default function PortfolioScreen() {
     return Object.entries(by).map(([k, v]) => ({ value: v, color: chartColors[k as AssetClass] || '#999', text: k, label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
   }, [holdings, totalValue]);
 
-  const countryPalette = ['#6C9CFF', '#FF9933', '#4ECDC4', '#FFD93D', '#FF6B9D', '#B07CFF', '#003399', '#22c55e', '#ef4444', '#9BA3B5'];
+  const countryPalette = vibrantPalette;
+
+  // Center label (dominant slice) for a donut dataset.
+  const centerOf = (data: { value: number; text: string }[]) => {
+    const tot = data.reduce((s, d) => s + d.value, 0);
+    const top = [...data].sort((a, b) => b.value - a.value)[0];
+    return { value: top && tot > 0 ? `${Math.round((top.value / tot) * 100)}%` : '', title: top?.text ?? '' };
+  };
 
   // Group current value, invested value and gain by a key → slices with return %.
   const groupBy = (keyFn: (h: EnrichedHolding) => string, colorFn: (k: string, i: number) => string) => {
@@ -299,7 +307,7 @@ export default function PortfolioScreen() {
             <Card.Content>
               <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 16 }}>Asset Allocation</Text>
               <View style={styles.chartRow}>
-                <PieChart data={allocationData} radius={70} innerRadius={45} innerCircleColor={theme.colors.surface} />
+                <DonutChart data={allocationData} centerValue={centerOf(allocationData).value} centerTitle={centerOf(allocationData).title} />
                 <View style={styles.legendCol}>
                   {allocationData.map((d) => (
                     <View key={d.text} style={styles.legendItem}>
@@ -318,7 +326,7 @@ export default function PortfolioScreen() {
             <Card.Content>
               <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 16 }}>Country Split</Text>
               <View style={styles.chartRow}>
-                <PieChart data={countryData} radius={70} innerRadius={45} innerCircleColor={theme.colors.surface} />
+                <DonutChart data={countryData} centerValue={centerOf(countryData).value} centerTitle={centerOf(countryData).title} />
                 <View style={styles.legendCol}>
                   {countryData.map((d) => (
                     <View key={d.text} style={styles.legendItem}>
@@ -342,7 +350,7 @@ export default function PortfolioScreen() {
             <Card.Content>
               <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 16 }}>Currency Split</Text>
               <View style={styles.chartRow}>
-                <PieChart data={currencyData} radius={70} innerRadius={45} innerCircleColor={theme.colors.surface} />
+                <DonutChart data={currencyData} centerValue={centerOf(currencyData).value} centerTitle={centerOf(currencyData).title} />
                 <View style={styles.legendCol}>
                   {currencyData.map((d) => (
                     <View key={d.text} style={styles.legendItem}>

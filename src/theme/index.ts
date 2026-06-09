@@ -1,23 +1,23 @@
 import { MD3DarkTheme, MD3LightTheme } from 'react-native-paper';
 
 const colors = {
-  primary: '#6C9CFF',
-  primaryContainer: '#1A2744',
-  secondary: '#4ECDC4',
-  secondaryContainer: '#1A3B38',
-  tertiary: '#FFD93D',
-  tertiaryContainer: '#3D3419',
-  error: '#FF6B6B',
-  errorContainer: '#3D1A1A',
-  success: '#4ECDC4',
-  warning: '#FFD93D',
-  surface: '#0F1420',
-  surfaceVariant: '#1A2030',
-  background: '#0A0E1A',
-  outline: '#2A3040',
+  primary: '#8B7CFF',
+  primaryContainer: '#241E47',
+  secondary: '#2DD4BF',
+  secondaryContainer: '#0E3A36',
+  tertiary: '#FBBF24',
+  tertiaryContainer: '#3A2E0E',
+  error: '#FB7185',
+  errorContainer: '#3D1620',
+  success: '#34D399',
+  warning: '#FBBF24',
+  surface: '#151B2E',
+  surfaceVariant: '#1F2740',
+  background: '#0B1020',
+  outline: '#2C344E',
   onPrimary: '#FFFFFF',
-  onSurface: '#E8ECF4',
-  onSurfaceVariant: '#9BA3B5',
+  onSurface: '#EEF1FA',
+  onSurfaceVariant: '#A4ADC6',
   onBackground: '#E8ECF4',
 };
 
@@ -54,17 +54,23 @@ export const lightTheme = {
 };
 
 export const chartColors = {
-  equity: '#6C9CFF',
-  debt: '#4ECDC4',
-  gold: '#FFD93D',
-  crypto: '#FF6B9D',
-  cash: '#9BA3B5',
-  real_estate: '#B07CFF',
-  india: '#FF9933',
-  europe: '#003399',
-  us: '#3A6FD8',
-  global: '#4ECDC4',
+  equity: '#8B7CFF',
+  debt: '#2DD4BF',
+  gold: '#FBBF24',
+  crypto: '#F472B6',
+  cash: '#94A3B8',
+  real_estate: '#A78BFA',
+  india: '#FB923C',
+  europe: '#60A5FA',
+  us: '#34D399',
+  global: '#22D3EE',
 };
+
+// Vibrant palette for dynamic groupings (countries, etc.).
+export const vibrantPalette = [
+  '#8B7CFF', '#FB923C', '#2DD4BF', '#FBBF24', '#F472B6',
+  '#60A5FA', '#34D399', '#22D3EE', '#A78BFA', '#FB7185',
+];
 
 export const expenseCategories: Record<string, string> = {
   housing: '#6C9CFF',
