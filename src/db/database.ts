@@ -32,12 +32,25 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     await database.execAsync(MIGRATION_V2);
     await database.runAsync('INSERT INTO schema_version (version) VALUES (?)', 2);
   }
+
+  if (currentVersion < 3) {
+    await database.execAsync(MIGRATION_V3);
+    await database.runAsync('INSERT INTO schema_version (version) VALUES (?)', 3);
+  }
 }
 
 // v2: interest rate (cash/FD/PPF/NPS/bonds) and precise country for recommendations.
 const MIGRATION_V2 = `
   ALTER TABLE holdings ADD COLUMN interest_rate REAL;
   ALTER TABLE holdings ADD COLUMN country TEXT;
+`;
+
+// v3: daily net-worth snapshots (canonical INR) for the portfolio trendline.
+const MIGRATION_V3 = `
+  CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+    date TEXT PRIMARY KEY,
+    value_inr REAL NOT NULL
+  );
 `;
 
 const MIGRATION_V1 = `

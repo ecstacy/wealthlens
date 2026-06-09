@@ -1,12 +1,16 @@
 import React, { useState, useCallback } from 'react';
 import { View, ScrollView, StyleSheet, RefreshControl, Pressable } from 'react-native';
-import { Text, Card, FAB, useTheme, Chip, Divider, Button } from 'react-native-paper';
-import { PieChart } from 'react-native-gifted-charts';
+import { Text, Card, FAB, useTheme, Chip, Divider, IconButton, Menu, Button } from 'react-native-paper';
+import { PieChart, LineChart } from 'react-native-gifted-charts';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { getDatabase } from '../../src/db/database';
-import { enrichHoldings, type EnrichedHolding } from '../../src/services/market';
+import { enrichHoldings, fetchExchangeRate, type EnrichedHolding } from '../../src/services/market';
+import { recordSnapshot, getSnapshots, type Snapshot } from '../../src/services/snapshots';
+import { useSettingsStore } from '../../src/stores/settingsStore';
 import { chartColors } from '../../src/theme';
-import type { Holding, AssetClass } from '../../src/types';
+import type { Holding, AssetClass, Currency } from '../../src/types';
 
 interface ActiveSip {
   id: number;
@@ -19,106 +23,178 @@ interface ActiveSip {
 
 const GAIN = '#22c55e';
 const LOSS = '#ef4444';
+const LOCALES: Record<Currency, string> = { INR: 'en-IN', EUR: 'de-DE', USD: 'en-US', GBP: 'en-GB' };
 
 export default function PortfolioScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const { hideValues, displayCurrency, loadSettings, setHideValues, setDisplayCurrency } = useSettingsStore();
+
   const [holdings, setHoldings] = useState<EnrichedHolding[]>([]);
   const [sips, setSips] = useState<ActiveSip[]>([]);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [totalValue, setTotalValue] = useState(0);
-  const [totalInvested, setTotalInvested] = useState(0);
+  const [totalValue, setTotalValue] = useState(0); // INR
+  const [totalInvested, setTotalInvested] = useState(0); // INR
+  const [cagr, setCagr] = useState<number | null>(null);
+  const [displayRate, setDisplayRate] = useState(1);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [curMenu, setCurMenu] = useState(false);
 
   const loadData = useCallback(async (force = false) => {
+    await loadSettings();
     const db = await getDatabase();
     const rows = await db.getAllAsync<Holding>('SELECT * FROM holdings ORDER BY asset_class, name');
     const enriched = await enrichHoldings(rows, 'INR', force);
     setHoldings(enriched);
-    setTotalValue(enriched.reduce((s, h) => s + h.current_value, 0));
-    setTotalInvested(enriched.reduce((s, h) => s + h.invested_value, 0));
+
+    const totVal = enriched.reduce((s, h) => s + h.current_value, 0);
+    const totInv = enriched.reduce((s, h) => s + h.invested_value, 0);
+    setTotalValue(totVal);
+    setTotalInvested(totInv);
+
+    // Est. CAGR weighted by how long each holding has been tracked.
+    const now = Date.now();
+    let wYears = 0;
+    enriched.forEach((h) => {
+      const years = Math.max((now - new Date(h.created_at).getTime()) / (365.25 * 86400000), 1 / 365);
+      wYears += years * h.invested_value;
+    });
+    const avgYears = totInv > 0 ? wYears / totInv : 0;
+    setCagr(totInv > 0 && avgYears > 0.08 && totVal > 0 ? (Math.pow(totVal / totInv, 1 / avgYears) - 1) * 100 : null);
+
     if (enriched.some((h) => h.is_live)) setLastUpdated(new Date());
+
+    // Record + load history (canonical INR).
+    await recordSnapshot(totVal);
+    setSnapshots(await getSnapshots(60));
+
+    // Display currency conversion.
+    const { displayCurrency: cur } = useSettingsStore.getState();
+    setDisplayRate(cur === 'INR' ? 1 : await fetchExchangeRate('INR', cur));
 
     const sipRows = await db.getAllAsync<ActiveSip>(
       `SELECT sips.id, sips.amount, sips.currency, sips.frequency, sips.next_date, holdings.name AS holding_name
-       FROM sips JOIN holdings ON holdings.id = sips.holding_id
-       WHERE sips.is_active = 1
-       ORDER BY sips.next_date`
+       FROM sips JOIN holdings ON holdings.id = sips.holding_id WHERE sips.is_active = 1 ORDER BY sips.next_date`
     );
     setSips(sipRows);
-  }, []);
+  }, [loadSettings]);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadData(false);
-    }, [loadData])
-  );
+  useFocusEffect(useCallback(() => { loadData(false); }, [loadData]));
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadData(true); // force live prices on pull-to-refresh
+    await loadData(true);
     setRefreshing(false);
   };
 
   const totalGain = totalValue - totalInvested;
   const totalGainPct = totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0;
 
-  // Normalize each SIP to a monthly figure (assumes INR).
   const monthlyCommitment = sips.reduce((s, sip) => {
-    const factor = sip.frequency === 'weekly' ? 52 / 12 : sip.frequency === 'quarterly' ? 1 / 3 : 1;
-    return s + sip.amount * factor;
+    const f = sip.frequency === 'weekly' ? 52 / 12 : sip.frequency === 'quarterly' ? 1 / 3 : 1;
+    return s + sip.amount * f;
   }, 0);
 
+  // format an INR amount into the chosen display currency, honoring privacy.
+  const fmt = (inr: number) => {
+    if (hideValues) return '••••••';
+    const val = inr * displayRate;
+    return new Intl.NumberFormat(LOCALES[displayCurrency], { style: 'currency', currency: displayCurrency, maximumFractionDigits: 0 }).format(val);
+  };
+
   const allocationData = React.useMemo(() => {
-    const byClass: Record<string, number> = {};
-    holdings.forEach((h) => {
-      byClass[h.asset_class] = (byClass[h.asset_class] || 0) + h.current_value;
-    });
-    return Object.entries(byClass).map(([key, value]) => ({
-      value,
-      color: chartColors[key as AssetClass] || '#999',
-      text: key,
-      label: `${key} ${totalValue > 0 ? Math.round((value / totalValue) * 100) : 0}%`,
-    }));
+    const by: Record<string, number> = {};
+    holdings.forEach((h) => { by[h.asset_class] = (by[h.asset_class] || 0) + h.current_value; });
+    return Object.entries(by).map(([k, v]) => ({ value: v, color: chartColors[k as AssetClass] || '#999', text: k, label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
   }, [holdings, totalValue]);
 
   const geoData = React.useMemo(() => {
-    const byGeo: Record<string, number> = {};
-    holdings.forEach((h) => {
-      byGeo[h.geography] = (byGeo[h.geography] || 0) + h.current_value;
-    });
-    return Object.entries(byGeo).map(([key, value]) => ({
-      value,
-      color: chartColors[key as keyof typeof chartColors] || '#999',
-      text: key,
-      label: `${key} ${totalValue > 0 ? Math.round((value / totalValue) * 100) : 0}%`,
-    }));
+    const by: Record<string, number> = {};
+    holdings.forEach((h) => { by[h.geography] = (by[h.geography] || 0) + h.current_value; });
+    return Object.entries(by).map(([k, v]) => ({ value: v, color: chartColors[k as keyof typeof chartColors] || '#999', text: k, label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
   }, [holdings, totalValue]);
 
-  const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+  const trend = React.useMemo(
+    () => snapshots.map((s) => ({ value: s.value_inr * displayRate })),
+    [snapshots, displayRate]
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 12 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
       >
-        {/* Net worth + live gain/loss */}
+        {/* HERO */}
+        <LinearGradient colors={['#22305C', '#141B2E']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text variant="labelLarge" style={{ color: '#A9B4D0' }}>Net Worth</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Menu
+                visible={curMenu}
+                onDismiss={() => setCurMenu(false)}
+                anchor={<Button compact textColor="#A9B4D0" onPress={() => setCurMenu(true)} icon="chevron-down" contentStyle={{ flexDirection: 'row-reverse' }}>{displayCurrency}</Button>}
+              >
+                {(['INR', 'EUR', 'USD', 'GBP'] as Currency[]).map((c) => (
+                  <Menu.Item key={c} title={c} onPress={async () => { setCurMenu(false); await setDisplayCurrency(c); loadData(false); }} />
+                ))}
+              </Menu>
+              <IconButton icon={hideValues ? 'eye-off' : 'eye'} iconColor="#A9B4D0" size={20} onPress={() => setHideValues(!hideValues)} />
+              <IconButton icon="cog-outline" iconColor="#A9B4D0" size={20} onPress={() => router.push('/settings')} />
+            </View>
+          </View>
+
+          <Text variant="displaySmall" style={{ color: '#FFFFFF', fontWeight: '800' }}>{fmt(totalValue)}</Text>
+
+          {totalInvested > 0 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+              <View style={[styles.pill, { backgroundColor: totalGain >= 0 ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)' }]}>
+                <Text style={{ color: totalGain >= 0 ? GAIN : LOSS, fontWeight: '600' }}>
+                  {totalGain >= 0 ? '▲' : '▼'} {fmt(Math.abs(totalGain))} ({totalGainPct >= 0 ? '+' : ''}{totalGainPct.toFixed(1)}%)
+                </Text>
+              </View>
+              {cagr != null && (
+                <View style={[styles.pill, { backgroundColor: 'rgba(108,156,255,0.18)' }]}>
+                  <Text style={{ color: '#9DBEFF', fontWeight: '600' }}>Est. CAGR {cagr >= 0 ? '+' : ''}{cagr.toFixed(1)}%</Text>
+                </View>
+              )}
+            </View>
+          )}
+          <Text variant="labelSmall" style={{ color: '#6E7A99', marginTop: 8 }}>
+            {refreshing ? 'Updating prices…' : lastUpdated ? `Live · updated ${lastUpdated.toLocaleTimeString()}` : 'Pull down to refresh prices'}
+          </Text>
+        </LinearGradient>
+
+        {/* TRENDLINE */}
         <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
           <Card.Content>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>Net Worth</Text>
-              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                {refreshing ? 'Updating…' : lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : 'Pull to refresh prices'}
-              </Text>
-            </View>
-            <Text variant="headlineLarge" style={{ color: theme.colors.onSurface, fontWeight: '700', marginTop: 2 }}>
-              {formatCurrency(totalValue)}
-            </Text>
-            {totalInvested > 0 && (
-              <Text variant="bodyMedium" style={{ color: totalGain >= 0 ? GAIN : LOSS, marginTop: 4 }}>
-                {totalGain >= 0 ? '▲' : '▼'} {formatCurrency(Math.abs(totalGain))} ({totalGainPct >= 0 ? '+' : ''}
-                {totalGainPct.toFixed(2)}%)
+            <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 8 }}>Performance</Text>
+            {trend.length >= 2 ? (
+              <LineChart
+                data={trend}
+                areaChart
+                curved
+                hideDataPoints
+                color={theme.colors.primary}
+                startFillColor={theme.colors.primary}
+                endFillColor={theme.colors.surface}
+                startOpacity={0.35}
+                endOpacity={0.02}
+                thickness={2}
+                hideRules
+                yAxisThickness={0}
+                xAxisThickness={0}
+                hideYAxisText={hideValues}
+                yAxisTextStyle={{ color: theme.colors.onSurfaceVariant, fontSize: 9 }}
+                height={120}
+                adjustToWidth
+                initialSpacing={0}
+                disableScroll
+              />
+            ) : (
+              <Text style={{ color: theme.colors.onSurfaceVariant }}>
+                Building history — your net worth is recorded each time you open this screen. Check back over the coming days to see the trend.
               </Text>
             )}
           </Card.Content>
@@ -170,25 +246,17 @@ export default function PortfolioScreen() {
               <Button mode="text" compact onPress={() => router.push('/add-sip')}>+ Add SIP</Button>
             </View>
             {sips.length === 0 ? (
-              <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
-                No active SIPs. Add one to track recurring investments.
-              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>No active SIPs. Add one to track recurring investments.</Text>
             ) : (
               <>
-                <Text variant="bodyMedium" style={{ color: theme.colors.primary, marginTop: 4, marginBottom: 8 }}>
-                  ≈ {formatCurrency(monthlyCommitment)}/month committed
-                </Text>
+                <Text variant="bodyMedium" style={{ color: theme.colors.primary, marginTop: 4, marginBottom: 8 }}>≈ {fmt(monthlyCommitment)}/month committed</Text>
                 {sips.map((s) => (
                   <View key={s.id} style={styles.holdingRow}>
                     <View style={{ flex: 1 }}>
                       <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }} numberOfLines={1}>{s.holding_name}</Text>
-                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                        {s.frequency} · next {s.next_date}
-                      </Text>
+                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{s.frequency} · next {s.next_date}</Text>
                     </View>
-                    <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>
-                      {formatCurrency(s.amount)}
-                    </Text>
+                    <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>{fmt(s.amount)}</Text>
                   </View>
                 ))}
               </>
@@ -217,18 +285,13 @@ export default function PortfolioScreen() {
                       </View>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
-                      <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }}>
-                        {formatCurrency(h.current_value)}
-                      </Text>
+                      <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }}>{fmt(h.current_value)}</Text>
                       {h.is_live ? (
                         <Text variant="bodySmall" style={{ color: h.gain_loss >= 0 ? GAIN : LOSS }}>
-                          {h.gain_loss >= 0 ? '+' : ''}{h.gain_loss_pct.toFixed(1)}%
-                          {h.change_pct != null ? ` · ${h.change_pct >= 0 ? '+' : ''}${h.change_pct.toFixed(1)}% today` : ''}
+                          {h.gain_loss >= 0 ? '+' : ''}{h.gain_loss_pct.toFixed(1)}%{h.change_pct != null ? ` · ${h.change_pct >= 0 ? '+' : ''}${h.change_pct.toFixed(1)}% today` : ''}
                         </Text>
                       ) : (
-                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                          {h.currency !== 'INR' ? `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(h.avg_price * h.quantity)} ${h.currency}` : `${h.quantity} × ${formatCurrency(h.avg_price)}`}
-                        </Text>
+                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{hideValues ? '•••' : `${h.currency}`}</Text>
                       )}
                     </View>
                   </View>
@@ -242,12 +305,7 @@ export default function PortfolioScreen() {
         <View style={{ height: 80 }} />
       </ScrollView>
 
-      <FAB
-        icon="plus"
-        style={[styles.fab, { backgroundColor: theme.colors.primary }]}
-        color={theme.colors.onPrimary}
-        onPress={() => router.push('/add-holding')}
-      />
+      <FAB icon="plus" style={[styles.fab, { backgroundColor: theme.colors.primary }]} color={theme.colors.onPrimary} onPress={() => router.push('/add-holding')} />
     </View>
   );
 }
@@ -255,7 +313,9 @@ export default function PortfolioScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { padding: 16, gap: 16 },
-  card: { borderRadius: 12 },
+  hero: { borderRadius: 20, padding: 20 },
+  pill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  card: { borderRadius: 16 },
   chartRow: { flexDirection: 'row', alignItems: 'center', gap: 24 },
   legendCol: { flex: 1, gap: 6 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },

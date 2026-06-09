@@ -38,6 +38,7 @@ export default function TabLayout() {
         name="portfolio"
         options={{
           title: 'Portfolio',
+          headerShown: false, // custom gradient hero handles the top area
           tabBarIcon: ({ focused }) => tabIcon('pie-chart', focused),
         }}
       />
