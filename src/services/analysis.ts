@@ -8,6 +8,7 @@ interface PortfolioStructure {
   allocationByClass: Record<string, number>;
   allocationByGeo: Record<string, number>;
   allocationByCountry: Record<string, number>;
+  allocationByCurrency: Record<string, number>;
   topConcentrations: { name: string; percentage: number }[];
   interestBearing: { name: string; rate: number }[];
   sipCount: number;
@@ -30,6 +31,7 @@ export async function buildAnonymizedStructure(): Promise<PortfolioStructure> {
   const byClass: Record<string, number> = {};
   const byGeo: Record<string, number> = {};
   const byCountry: Record<string, number> = {};
+  const byCurrency: Record<string, number> = {};
   const concentrations: { name: string; percentage: number }[] = [];
   const interestBearing: { name: string; rate: number }[] = [];
 
@@ -39,6 +41,7 @@ export async function buildAnonymizedStructure(): Promise<PortfolioStructure> {
     byGeo[h.geography] = (byGeo[h.geography] || 0) + pct;
     const country = h.country || h.geography;
     byCountry[country] = (byCountry[country] || 0) + pct;
+    byCurrency[h.currency] = (byCurrency[h.currency] || 0) + pct;
     concentrations.push({ name: h.asset_type, percentage: Math.round(pct) });
     if (h.interest_rate) interestBearing.push({ name: h.asset_type, rate: h.interest_rate });
   });
@@ -53,6 +56,7 @@ export async function buildAnonymizedStructure(): Promise<PortfolioStructure> {
     allocationByClass: round(byClass),
     allocationByGeo: round(byGeo),
     allocationByCountry: round(byCountry),
+    allocationByCurrency: round(byCurrency),
     topConcentrations: concentrations.sort((a, b) => b.percentage - a.percentage).slice(0, 10),
     interestBearing,
     sipCount: sips.length,
@@ -73,6 +77,7 @@ Portfolio Structure (percentages only, no actual amounts):
 - Asset Allocation: ${JSON.stringify(structure.allocationByClass)}
 - Geography Split: ${JSON.stringify(structure.allocationByGeo)}
 - Country Split: ${JSON.stringify(structure.allocationByCountry)}
+- Currency Exposure: ${JSON.stringify(structure.allocationByCurrency)}
 - Top Concentrations by type: ${JSON.stringify(structure.topConcentrations)}
 - Interest-bearing holdings (% p.a.): ${JSON.stringify(structure.interestBearing)}
 - Active SIPs: ${structure.sipCount}
@@ -83,7 +88,7 @@ Recommended allocation for age 30-35: 60-70% equity, 15-20% debt, 5-10% gold, 5%
 Provide:
 1. Portfolio health score (1-10)
 2. Key strengths
-3. Risks and gaps (concentration, missing asset classes, geography imbalance)
+3. Risks and gaps (concentration, missing asset classes, geography/country imbalance, currency exposure risk)
 4. Top 3 actionable recommendations
 5. Rebalancing suggestions
 

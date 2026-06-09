@@ -110,25 +110,40 @@ export default function PortfolioScreen() {
   }, [holdings, totalValue]);
 
   const countryPalette = ['#6C9CFF', '#FF9933', '#4ECDC4', '#FFD93D', '#FF6B9D', '#B07CFF', '#003399', '#22c55e', '#ef4444', '#9BA3B5'];
-  const countryData = React.useMemo(() => {
-    const by: Record<string, number> = {};
+
+  // Group current value, invested value and gain by a key → slices with return %.
+  const groupBy = (keyFn: (h: EnrichedHolding) => string, colorFn: (k: string, i: number) => string) => {
+    const val: Record<string, number> = {};
+    const inv: Record<string, number> = {};
+    const gain: Record<string, number> = {};
     holdings.forEach((h) => {
-      const key = h.country || h.geography; // precise country, falling back to region
-      by[key] = (by[key] || 0) + h.current_value;
+      const k = keyFn(h);
+      val[k] = (val[k] || 0) + h.current_value;
+      inv[k] = (inv[k] || 0) + h.invested_value;
+      gain[k] = (gain[k] || 0) + h.gain_loss;
     });
-    return Object.entries(by)
+    return Object.entries(val)
       .sort((a, b) => b[1] - a[1])
-      .map(([k, v], i) => ({ value: v, color: countryPalette[i % countryPalette.length], text: k, label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
-  }, [holdings, totalValue]);
+      .map(([k, v], i) => ({
+        value: v,
+        color: colorFn(k, i),
+        text: k,
+        label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%`,
+        gainPct: inv[k] > 0 ? (gain[k] / inv[k]) * 100 : 0,
+        hasReturn: inv[k] > 0,
+      }));
+  };
+
+  const countryData = React.useMemo(
+    () => groupBy((h) => h.country || h.geography, (_, i) => countryPalette[i % countryPalette.length]),
+    [holdings, totalValue]
+  );
 
   const currencyColors: Record<string, string> = { INR: '#FF9933', EUR: '#003399', USD: '#22c55e', GBP: '#B07CFF' };
-  const currencyData = React.useMemo(() => {
-    const by: Record<string, number> = {};
-    holdings.forEach((h) => { by[h.currency] = (by[h.currency] || 0) + h.current_value; });
-    return Object.entries(by)
-      .sort((a, b) => b[1] - a[1])
-      .map(([k, v]) => ({ value: v, color: currencyColors[k] || '#9BA3B5', text: k, label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
-  }, [holdings, totalValue]);
+  const currencyData = React.useMemo(
+    () => groupBy((h) => h.currency, (k) => currencyColors[k] || '#9BA3B5'),
+    [holdings, totalValue]
+  );
 
   const trend = React.useMemo(
     () => snapshots.map((s) => ({ value: s.value_inr * displayRate })),
@@ -245,6 +260,11 @@ export default function PortfolioScreen() {
                     <View key={d.text} style={styles.legendItem}>
                       <View style={[styles.legendDot, { backgroundColor: d.color }]} />
                       <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{d.label}</Text>
+                      {d.hasReturn && (
+                        <Text variant="bodySmall" style={{ color: d.gainPct >= 0 ? GAIN : LOSS }}>
+                          {d.gainPct >= 0 ? '+' : ''}{d.gainPct.toFixed(1)}%
+                        </Text>
+                      )}
                     </View>
                   ))}
                 </View>
@@ -264,6 +284,11 @@ export default function PortfolioScreen() {
                     <View key={d.text} style={styles.legendItem}>
                       <View style={[styles.legendDot, { backgroundColor: d.color }]} />
                       <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{d.label}</Text>
+                      {d.hasReturn && (
+                        <Text variant="bodySmall" style={{ color: d.gainPct >= 0 ? GAIN : LOSS }}>
+                          {d.gainPct >= 0 ? '+' : ''}{d.gainPct.toFixed(1)}%
+                        </Text>
+                      )}
                     </View>
                   ))}
                 </View>
