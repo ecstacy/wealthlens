@@ -65,8 +65,13 @@ export default function PortfolioScreen() {
 
     if (enriched.some((h) => h.is_live)) setLastUpdated(new Date());
 
-    // Record + load history (canonical INR).
-    await recordSnapshot(totVal);
+    // Record + load history (canonical INR), with a per-region breakdown.
+    const region = { india: 0, europe: 0, other: 0 };
+    enriched.forEach((h) => {
+      const r = h.geography === 'india' ? 'india' : h.geography === 'europe' ? 'europe' : 'other';
+      region[r] += h.current_value;
+    });
+    await recordSnapshot(totVal, region);
     setSnapshots(await getSnapshots(60));
 
     // Display currency conversion.
@@ -150,6 +155,37 @@ export default function PortfolioScreen() {
     [snapshots, displayRate]
   );
 
+  // Region trendline (India vs Europe vs Other) from snapshots that carry a breakdown.
+  const regionTrend = React.useMemo(() => {
+    const parsed = snapshots
+      .filter((s) => s.breakdown)
+      .map((s) => JSON.parse(s.breakdown as string) as { india?: number; europe?: number; other?: number });
+    if (parsed.length < 2) return null;
+    const series = (key: 'india' | 'europe' | 'other', color: string) => ({
+      data: parsed.map((p) => ({ value: (p[key] || 0) * displayRate })),
+      color,
+    });
+    const sets = [series('india', '#FF9933'), series('europe', '#003399')];
+    if (parsed.some((p) => (p.other || 0) > 0)) sets.push(series('other', '#4ECDC4'));
+    return sets;
+  }, [snapshots, displayRate]);
+
+  // Rule-based currency-hedging tip.
+  const hedgeTip = React.useMemo(() => {
+    if (currencyData.length < 2 || totalValue <= 0) return null;
+    const top = currencyData[0];
+    const topShare = Math.round((top.value / totalValue) * 100);
+    const foreign = currencyData.filter((c) => c.text !== 'INR').reduce((s, c) => s + c.value, 0);
+    const foreignShare = Math.round((foreign / totalValue) * 100);
+    if (topShare >= 75) {
+      return `${topShare}% of your portfolio is in ${top.text}. That's a concentrated currency bet — a swing in ${top.text} moves most of your wealth. Consider diversifying across currencies or holding a buffer in the currency you spend in.`;
+    }
+    if (foreignShare >= 25) {
+      return `${foreignShare}% sits outside INR. Currency moves can meaningfully change INR-denominated returns. Keep an emergency buffer in your day-to-day spending currency, and consider this exposure when rebalancing.`;
+    }
+    return null;
+  }, [currencyData, totalValue]);
+
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <ScrollView
@@ -230,6 +266,34 @@ export default function PortfolioScreen() {
           </Card.Content>
         </Card>
 
+        {regionTrend && (
+          <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+            <Card.Content>
+              <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 8 }}>Performance by Region</Text>
+              <LineChart
+                dataSet={regionTrend}
+                curved
+                hideDataPoints
+                thickness={2}
+                hideRules
+                yAxisThickness={0}
+                xAxisThickness={0}
+                hideYAxisText={hideValues}
+                yAxisTextStyle={{ color: theme.colors.onSurfaceVariant, fontSize: 9 }}
+                height={120}
+                adjustToWidth
+                initialSpacing={0}
+                disableScroll
+              />
+              <View style={{ flexDirection: 'row', gap: 16, marginTop: 8 }}>
+                <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#FF9933' }]} /><Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>India</Text></View>
+                <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#003399' }]} /><Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>Europe</Text></View>
+                <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#4ECDC4' }]} /><Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>Other</Text></View>
+              </View>
+            </Card.Content>
+          </Card>
+        )}
+
         {allocationData.length > 0 && (
           <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
             <Card.Content>
@@ -293,6 +357,16 @@ export default function PortfolioScreen() {
                   ))}
                 </View>
               </View>
+            </Card.Content>
+          </Card>
+        )}
+
+        {/* Currency hedging tip */}
+        {hedgeTip && !hideValues && (
+          <Card style={[styles.card, { backgroundColor: theme.colors.tertiaryContainer }]}>
+            <Card.Content style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
+              <IconButton icon="swap-horizontal" size={20} iconColor={theme.colors.tertiary} style={{ margin: 0 }} />
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurface, flex: 1 }}>{hedgeTip}</Text>
             </Card.Content>
           </Card>
         )}

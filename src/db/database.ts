@@ -37,7 +37,17 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     await database.execAsync(MIGRATION_V3);
     await database.runAsync('INSERT INTO schema_version (version) VALUES (?)', 3);
   }
+
+  if (currentVersion < 4) {
+    await database.execAsync(MIGRATION_V4);
+    await database.runAsync('INSERT INTO schema_version (version) VALUES (?)', 4);
+  }
 }
+
+// v4: per-region breakdown (JSON) on snapshots for the region trendline.
+const MIGRATION_V4 = `
+  ALTER TABLE portfolio_snapshots ADD COLUMN breakdown TEXT;
+`;
 
 // v2: interest rate (cash/FD/PPF/NPS/bonds) and precise country for recommendations.
 const MIGRATION_V2 = `
