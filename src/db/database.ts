@@ -27,7 +27,18 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
     await database.execAsync(MIGRATION_V1);
     await database.runAsync('INSERT INTO schema_version (version) VALUES (?)', 1);
   }
+
+  if (currentVersion < 2) {
+    await database.execAsync(MIGRATION_V2);
+    await database.runAsync('INSERT INTO schema_version (version) VALUES (?)', 2);
+  }
 }
+
+// v2: interest rate (cash/FD/PPF/NPS/bonds) and precise country for recommendations.
+const MIGRATION_V2 = `
+  ALTER TABLE holdings ADD COLUMN interest_rate REAL;
+  ALTER TABLE holdings ADD COLUMN country TEXT;
+`;
 
 const MIGRATION_V1 = `
   CREATE TABLE IF NOT EXISTS accounts (

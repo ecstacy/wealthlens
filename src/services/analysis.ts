@@ -1,12 +1,15 @@
 import * as SecureStore from 'expo-secure-store';
 import { getDatabase } from '../db/database';
-import type { Holding, AssetClass, Geography } from '../types';
+import { convertToBase } from './market';
+import type { Holding } from '../types';
 
 interface PortfolioStructure {
   totalHoldings: number;
   allocationByClass: Record<string, number>;
   allocationByGeo: Record<string, number>;
+  allocationByCountry: Record<string, number>;
   topConcentrations: { name: string; percentage: number }[];
+  interestBearing: { name: string; rate: number }[];
   sipCount: number;
   monthlyCommitment: number;
 }
@@ -15,28 +18,43 @@ export async function buildAnonymizedStructure(): Promise<PortfolioStructure> {
   const db = await getDatabase();
   const holdings = await db.getAllAsync<Holding>('SELECT * FROM holdings');
 
-  const totalValue = holdings.reduce((s, h) => s + h.quantity * h.avg_price, 0);
+  // Convert each holding to INR so allocation percentages aren't skewed by currency.
+  const valued = await Promise.all(
+    holdings.map(async (h) => ({
+      h,
+      val: await convertToBase(h.quantity * h.avg_price, h.currency, 'INR'),
+    }))
+  );
+  const totalValue = valued.reduce((s, v) => s + v.val, 0);
 
   const byClass: Record<string, number> = {};
   const byGeo: Record<string, number> = {};
+  const byCountry: Record<string, number> = {};
   const concentrations: { name: string; percentage: number }[] = [];
+  const interestBearing: { name: string; rate: number }[] = [];
 
-  holdings.forEach((h) => {
-    const val = h.quantity * h.avg_price;
+  valued.forEach(({ h, val }) => {
     const pct = totalValue > 0 ? (val / totalValue) * 100 : 0;
-
     byClass[h.asset_class] = (byClass[h.asset_class] || 0) + pct;
     byGeo[h.geography] = (byGeo[h.geography] || 0) + pct;
+    const country = h.country || h.geography;
+    byCountry[country] = (byCountry[country] || 0) + pct;
     concentrations.push({ name: h.asset_type, percentage: Math.round(pct) });
+    if (h.interest_rate) interestBearing.push({ name: h.asset_type, rate: h.interest_rate });
   });
 
   const sips = await db.getAllAsync<{ amount: number }>('SELECT amount FROM sips WHERE is_active = 1');
 
+  const round = (o: Record<string, number>) =>
+    Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Math.round(v)]));
+
   return {
     totalHoldings: holdings.length,
-    allocationByClass: Object.fromEntries(Object.entries(byClass).map(([k, v]) => [k, Math.round(v)])),
-    allocationByGeo: Object.fromEntries(Object.entries(byGeo).map(([k, v]) => [k, Math.round(v)])),
+    allocationByClass: round(byClass),
+    allocationByGeo: round(byGeo),
+    allocationByCountry: round(byCountry),
     topConcentrations: concentrations.sort((a, b) => b.percentage - a.percentage).slice(0, 10),
+    interestBearing,
     sipCount: sips.length,
     monthlyCommitment: sips.reduce((s, sip) => s + sip.amount, 0),
   };
@@ -54,7 +72,9 @@ export async function analysePortfolio(): Promise<string> {
 Portfolio Structure (percentages only, no actual amounts):
 - Asset Allocation: ${JSON.stringify(structure.allocationByClass)}
 - Geography Split: ${JSON.stringify(structure.allocationByGeo)}
+- Country Split: ${JSON.stringify(structure.allocationByCountry)}
 - Top Concentrations by type: ${JSON.stringify(structure.topConcentrations)}
+- Interest-bearing holdings (% p.a.): ${JSON.stringify(structure.interestBearing)}
 - Active SIPs: ${structure.sipCount}
 - Total holdings: ${structure.totalHoldings}
 

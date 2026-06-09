@@ -37,6 +37,8 @@ export interface Holding {
   quantity: number;
   avg_price: number;
   currency: Currency;
+  interest_rate?: number | null;
+  country?: string | null;
   current_price?: number;
   current_value?: number;
   gain_loss?: number;

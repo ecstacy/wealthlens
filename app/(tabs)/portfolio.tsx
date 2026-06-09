@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, ScrollView, StyleSheet, RefreshControl } from 'react-native';
+import { View, ScrollView, StyleSheet, RefreshControl, Pressable } from 'react-native';
 import { Text, Card, FAB, useTheme, Chip, Divider, Button } from 'react-native-paper';
 import { PieChart } from 'react-native-gifted-charts';
 import { router, useFocusEffect } from 'expo-router';
@@ -204,7 +204,7 @@ export default function PortfolioScreen() {
               <Text style={{ color: theme.colors.onSurfaceVariant }}>No holdings yet. Tap + to add your first investment.</Text>
             ) : (
               holdings.map((h) => (
-                <View key={h.id}>
+                <Pressable key={h.id} onPress={() => router.push(`/edit-holding?id=${h.id}`)}>
                   <View style={styles.holdingRow}>
                     <View style={{ flex: 1 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -213,7 +213,7 @@ export default function PortfolioScreen() {
                       </View>
                       <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
                         <Chip compact textStyle={{ fontSize: 10 }}>{h.asset_type}</Chip>
-                        <Chip compact textStyle={{ fontSize: 10 }}>{h.geography}</Chip>
+                        <Chip compact textStyle={{ fontSize: 10 }}>{h.country || h.geography}</Chip>
                       </View>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
@@ -227,13 +227,13 @@ export default function PortfolioScreen() {
                         </Text>
                       ) : (
                         <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                          {h.quantity} × {formatCurrency(h.avg_price)}
+                          {h.currency !== 'INR' ? `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(h.avg_price * h.quantity)} ${h.currency}` : `${h.quantity} × ${formatCurrency(h.avg_price)}`}
                         </Text>
                       )}
                     </View>
                   </View>
                   <Divider style={{ backgroundColor: theme.colors.outline, marginVertical: 8 }} />
-                </View>
+                </Pressable>
               ))
             )}
           </Card.Content>
