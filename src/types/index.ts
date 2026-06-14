@@ -11,6 +11,7 @@ export type AssetType =
   | 'sgb'
   | 'bond'
   | 'crypto'
+  | 'robo'
   | 'cash';
 
 export type AssetClass = 'equity' | 'debt' | 'gold' | 'crypto' | 'cash' | 'real_estate';

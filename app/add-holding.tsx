@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
-import { Text, TextInput, Button, useTheme, ProgressBar, List, Divider, HelperText } from 'react-native-paper';
+import { Text, TextInput, Button, useTheme, ProgressBar, List, Divider, HelperText, SegmentedButtons } from 'react-native-paper';
 import { router } from 'expo-router';
 import { getDatabase } from '../src/db/database';
 import SecuritySearchField from '../src/components/SecuritySearchField';
@@ -22,6 +22,7 @@ export default function AddHoldingScreen() {
   const [quantity, setQuantity] = useState('');
   const [avgPrice, setAvgPrice] = useState('');
   const [interestRate, setInterestRate] = useState('');
+  const [blendClass, setBlendClass] = useState<AssetClass>('equity'); // for blended products (robo)
   const [country, setCountry] = useState<CountryOption | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
   const [saving, setSaving] = useState(false);
@@ -82,6 +83,7 @@ export default function AddHoldingScreen() {
       // amount type: value = amount, quantity = 1
       qty = 1;
       price = parseFloat(amount);
+      if (category.chooseAssetClass) assetClass = blendClass;
     }
 
     await db.runAsync(
@@ -158,8 +160,18 @@ export default function AddHoldingScreen() {
               </>
             ) : (
               <>
-                <TextInput label="Name / Label" value={name} onChangeText={setName} mode="outlined" style={styles.input} placeholder="e.g., HDFC Savings, SBI 1yr FD" />
+                <TextInput label="Name / Label" value={name} onChangeText={setName} mode="outlined" style={styles.input} placeholder={category.key === 'robo' ? 'e.g., Scripbox, Kuvera, Betterment' : 'e.g., HDFC Savings, SBI 1yr FD'} />
                 <TextInput label="Current value / balance" value={amount} onChangeText={setAmount} mode="outlined" keyboardType="numeric" style={styles.input} placeholder="e.g., 250000" />
+                {category.chooseAssetClass && (
+                  <>
+                    <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 12, marginBottom: 4 }}>Mandate / dominant asset class</Text>
+                    <SegmentedButtons
+                      value={blendClass}
+                      onValueChange={(v) => setBlendClass(v as AssetClass)}
+                      buttons={[{ value: 'equity', label: 'Equity' }, { value: 'debt', label: 'Debt' }, { value: 'gold', label: 'Gold' }]}
+                    />
+                  </>
+                )}
                 {category.hasInterest && (
                   <>
                     <TextInput label="Interest rate (% p.a.)" value={interestRate} onChangeText={setInterestRate} mode="outlined" keyboardType="numeric" style={styles.input} placeholder="e.g., 7.1" />

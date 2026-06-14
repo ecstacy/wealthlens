@@ -10,6 +10,7 @@ export interface HoldingCategory {
   searchMode?: 'security' | 'fund';
   hasInterest?: boolean;
   hasQuantity?: boolean;
+  chooseAssetClass?: boolean; // let the user pick the class (blended products)
 }
 
 export const HOLDING_CATEGORIES: HoldingCategory[] = [
@@ -22,10 +23,11 @@ export const HOLDING_CATEGORIES: HoldingCategory[] = [
   { key: 'nps', label: 'NPS', icon: 'shield-account', assetType: 'nps', assetClass: 'equity', flow: 'amount', hasInterest: true },
   { key: 'sgb', label: 'Sovereign Gold Bond', icon: 'gold', assetType: 'sgb', assetClass: 'gold', flow: 'amount', hasInterest: true },
   { key: 'bond', label: 'Bond', icon: 'file-document-outline', assetType: 'bond', assetClass: 'debt', flow: 'amount', hasInterest: true },
+  { key: 'robo', label: 'Robo Advisor', icon: 'robot-outline', assetType: 'robo', assetClass: 'equity', flow: 'amount', chooseAssetClass: true },
 ];
 
 // Asset types entered as a single amount (value = amount, quantity = 1) rather
 // than quantity × price.
-export const AMOUNT_ASSET_TYPES: AssetType[] = ['cash', 'fd', 'ppf', 'nps', 'sgb', 'bond'];
+export const AMOUNT_ASSET_TYPES: AssetType[] = ['cash', 'fd', 'ppf', 'nps', 'sgb', 'bond', 'robo'];
 
 export const isAmountType = (t: AssetType) => AMOUNT_ASSET_TYPES.includes(t);
