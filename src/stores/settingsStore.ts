@@ -3,7 +3,6 @@ import * as SecureStore from 'expo-secure-store';
 
 type Currency = 'INR' | 'EUR' | 'USD' | 'GBP';
 
-const HIDE_KEY = 'wealthlens_hide_values';
 const CURRENCY_KEY = 'wealthlens_display_currency';
 
 interface SettingsState {
@@ -25,20 +24,23 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   age: 35,
   baseCurrency: 'INR',
   displayCurrency: 'INR',
-  hideValues: true, // privacy-first: values hidden by default
+  // Privacy-first: always start hidden each app launch. This is intentionally
+  // NOT persisted — the "shown" state lives only in memory for the session, so
+  // a fresh launch always requires tapping the eye to reveal values.
+  hideValues: true,
   riskTolerance: 'moderate',
   darkMode: true,
   claudeApiKey: null,
 
   loadSettings: async () => {
-    const [apiKey, hide, cur] = await Promise.all([
+    // Note: hideValues is deliberately not loaded — it resets to hidden on
+    // each launch and is only toggled in-memory during a session.
+    const [apiKey, cur] = await Promise.all([
       SecureStore.getItemAsync('wealthlens_claude_key'),
-      SecureStore.getItemAsync(HIDE_KEY),
       SecureStore.getItemAsync(CURRENCY_KEY),
     ]);
     set({
       claudeApiKey: apiKey,
-      hideValues: hide === null ? true : hide === 'true',
       displayCurrency: (cur as Currency) || 'INR',
     });
   },
@@ -53,7 +55,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
 
   setHideValues: async (hide: boolean) => {
-    await SecureStore.setItemAsync(HIDE_KEY, String(hide));
+    // In-memory only — not persisted, so it resets to hidden next launch.
     set({ hideValues: hide });
   },
 
