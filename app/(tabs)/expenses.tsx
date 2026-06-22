@@ -6,6 +6,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { getDatabase } from '../../src/db/database';
 import { expenseCategories } from '../../src/theme';
 import { useMoney } from '../../src/hooks/useMoney';
+import { prettyLabel, compactNumber } from '../../src/utils/labels';
 import MoneyControls from '../../src/components/MoneyControls';
 import type { Expense } from '../../src/types';
 
@@ -99,7 +100,8 @@ export default function ExpensesScreen() {
                 barWidth={28}
                 spacing={16}
                 roundedTop
-                noOfSections={4}
+                noOfSections={3}
+                formatYLabel={(v: string) => compactNumber(Number(v))}
                 yAxisTextStyle={{ color: theme.colors.onSurfaceVariant, fontSize: 10 }}
                 xAxisLabelTextStyle={{ color: theme.colors.onSurfaceVariant, fontSize: 10 }}
                 hideRules
@@ -120,7 +122,7 @@ export default function ExpensesScreen() {
                     <View style={[styles.catDot, { backgroundColor: expenseCategories[e.category] || '#999' }]} />
                     <View style={{ flex: 1 }}>
                       <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }}>{e.description}</Text>
-                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{e.category}</Text>
+                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{prettyLabel(e.category)}</Text>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text variant="bodyLarge" style={{ color: theme.colors.error }}>{fmt(e.amount, e.currency)}</Text>

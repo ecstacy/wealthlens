@@ -111,6 +111,19 @@ export async function convertToBase(amount: number, from: Currency, baseCurrency
   return amount * rate;
 }
 
+/** Read a cached quote ignoring expiry; never hits the network. */
+export async function readCache(symbol: string): Promise<MarketCache | null> {
+  return getCachedPrice(symbol, true);
+}
+
+/** Read a cached FX rate ignoring expiry; never hits the network (fallback 1). */
+export async function readCachedRate(from: Currency, to: Currency): Promise<number> {
+  if (from === to) return 1;
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<{ rate: number }>('SELECT rate FROM exchange_rates WHERE pair = ?', `${from}_${to}`);
+  return row?.rate ?? 1;
+}
+
 async function getCachedPrice(symbol: string, ignoreExpiry = false): Promise<MarketCache | null> {
   const db = await getDatabase();
   const row = await db.getFirstAsync<MarketCache>(
@@ -161,8 +174,13 @@ export interface EnrichedHolding extends Holding {
 export async function enrichHoldings(
   holdings: Holding[],
   baseCurrency: Currency = 'INR',
-  force = false
+  force = false,
+  cachedOnly = false
 ): Promise<EnrichedHolding[]> {
+  const convert = (amount: number, from: Currency) =>
+    cachedOnly ? Promise.resolve(amount).then(async (a) => a * (await readCachedRate(from, baseCurrency)))
+               : convertToBase(amount, from, baseCurrency);
+
   return Promise.all(
     holdings.map(async (h) => {
       let currentPrice: number | undefined;
@@ -171,8 +189,9 @@ export async function enrichHoldings(
       let isLive = false;
 
       if (h.symbol) {
-        const quote =
-          h.asset_type === 'mutual_fund'
+        const quote = cachedOnly
+          ? await readCache(h.asset_type === 'mutual_fund' ? `MF_${h.symbol}` : h.symbol)
+          : h.asset_type === 'mutual_fund'
             ? await fetchMutualFundNAV(h.symbol, force)
             : await fetchStockPrice(h.symbol, force);
         if (quote && quote.price > 0) {
@@ -187,8 +206,8 @@ export async function enrichHoldings(
       const currentNative = effectivePrice * h.quantity;
       const investedNative = h.avg_price * h.quantity;
 
-      const currentValue = await convertToBase(currentNative, priceCurrency, baseCurrency);
-      const investedValue = await convertToBase(investedNative, h.currency, baseCurrency);
+      const currentValue = await convert(currentNative, priceCurrency);
+      const investedValue = await convert(investedNative, h.currency);
       const gainLoss = currentValue - investedValue;
       const gainLossPct = investedValue > 0 ? (gainLoss / investedValue) * 100 : 0;
 

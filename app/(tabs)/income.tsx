@@ -6,6 +6,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { getDatabase } from '../../src/db/database';
 import { enrichHoldings } from '../../src/services/market';
 import { useMoney } from '../../src/hooks/useMoney';
+import { prettyLabel } from '../../src/utils/labels';
 import MoneyControls from '../../src/components/MoneyControls';
 import type { Income, Expense, Holding } from '../../src/types';
 
@@ -233,8 +234,8 @@ export default function IncomeScreen() {
                     <View style={{ flex: 1 }}>
                       <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }}>{inc.source}</Text>
                       <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-                        <Chip compact textStyle={{ fontSize: 10 }}>{inc.category}</Chip>
-                        {inc.is_recurring && <Chip compact textStyle={{ fontSize: 10 }}>{inc.frequency}</Chip>}
+                        <Chip compact textStyle={{ fontSize: 10 }}>{prettyLabel(inc.category)}</Chip>
+                        {inc.is_recurring && <Chip compact textStyle={{ fontSize: 10 }}>{prettyLabel(inc.frequency || '')}</Chip>}
                       </View>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>

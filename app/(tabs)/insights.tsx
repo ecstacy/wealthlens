@@ -1,10 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import { View, ScrollView, StyleSheet } from 'react-native';
-import { Text, Card, Button, useTheme, ActivityIndicator } from 'react-native-paper';
+import { Text, Card, Button, useTheme, ActivityIndicator, Snackbar } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import * as Clipboard from 'expo-clipboard';
 import { analysePortfolio, analyseOverlaps, forecastReturns } from '../../src/services/analysis';
+import { buildShareText } from '../../src/services/shareSummary';
 
 type AnalysisType = 'portfolio' | 'overlaps' | 'forecast' | 'rebalance' | 'tax';
 
@@ -12,6 +14,13 @@ export default function InsightsScreen() {
   const theme = useTheme();
   const [loading, setLoading] = useState<AnalysisType | null>(null);
   const [results, setResults] = useState<Record<string, string>>({});
+  const [snack, setSnack] = useState('');
+
+  const copyForClaude = async () => {
+    const text = await buildShareText();
+    await Clipboard.setStringAsync(text);
+    setSnack('Portfolio summary copied — paste it into a Claude chat.');
+  };
   const [hasKey, setHasKey] = useState<boolean | null>(null);
 
   // Re-check the saved API key every time this screen comes into focus,
@@ -115,6 +124,19 @@ export default function InsightsScreen() {
           </Card.Content>
         </Card>
 
+        <Card style={[styles.card, { backgroundColor: theme.colors.surface }]} onPress={copyForClaude}>
+          <Card.Content>
+            <View style={styles.cardHeader}>
+              <Ionicons name="copy-outline" size={24} color={theme.colors.secondary} />
+              <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginLeft: 12, flex: 1 }}>Copy Summary for Claude</Text>
+              <Ionicons name="chevron-forward" size={20} color={theme.colors.onSurfaceVariant} />
+            </View>
+            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }}>
+              Copy a text summary of your portfolio to paste into a free Claude chat — no API key or cost.
+            </Text>
+          </Card.Content>
+        </Card>
+
         <Card style={[styles.card, { backgroundColor: theme.colors.surface }]} onPress={() => router.push('/tax-summary')}>
           <Card.Content>
             <View style={styles.cardHeader}>
@@ -163,6 +185,7 @@ export default function InsightsScreen() {
 
         <View style={{ height: 24 }} />
       </ScrollView>
+      <Snackbar visible={!!snack} onDismiss={() => setSnack('')} duration={3000}>{snack}</Snackbar>
     </View>
   );
 }

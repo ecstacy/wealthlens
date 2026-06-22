@@ -11,6 +11,7 @@ import { recordSnapshot, getSnapshots, type Snapshot } from '../../src/services/
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { chartColors, vibrantPalette } from '../../src/theme';
 import DonutChart from '../../src/components/DonutChart';
+import { prettyLabel, compactNumber } from '../../src/utils/labels';
 import type { Holding, AssetClass, Currency } from '../../src/types';
 
 interface ActiveSip {
@@ -42,19 +43,13 @@ export default function PortfolioScreen() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [curMenu, setCurMenu] = useState(false);
 
-  const loadData = useCallback(async (force = false) => {
-    await loadSettings();
-    const db = await getDatabase();
-    const rows = await db.getAllAsync<Holding>('SELECT * FROM holdings ORDER BY asset_class, name');
-    const enriched = await enrichHoldings(rows, 'INR', force);
+  // Apply an enriched dataset to all the derived UI state.
+  const apply = useCallback((enriched: EnrichedHolding[]) => {
     setHoldings(enriched);
-
     const totVal = enriched.reduce((s, h) => s + h.current_value, 0);
     const totInv = enriched.reduce((s, h) => s + h.invested_value, 0);
     setTotalValue(totVal);
     setTotalInvested(totInv);
-
-    // Est. CAGR weighted by how long each holding has been tracked.
     const now = Date.now();
     let wYears = 0;
     enriched.forEach((h) => {
@@ -63,10 +58,34 @@ export default function PortfolioScreen() {
     });
     const avgYears = totInv > 0 ? wYears / totInv : 0;
     setCagr(totInv > 0 && avgYears > 0.08 && totVal > 0 ? (Math.pow(totVal / totInv, 1 / avgYears) - 1) * 100 : null);
+    return totVal;
+  }, []);
 
+  const loadData = useCallback(async (force = false) => {
+    await loadSettings();
+    const db = await getDatabase();
+    const rows = await db.getAllAsync<Holding>('SELECT * FROM holdings ORDER BY asset_class, name');
+
+    // Phase 1 — instant paint from cache (no network), unless forcing a refresh.
+    if (!force) {
+      apply(await enrichHoldings(rows, 'INR', false, true));
+    }
+
+    // SIPs + display rate (quick).
+    const sipRows = await db.getAllAsync<ActiveSip>(
+      `SELECT sips.id, sips.amount, sips.currency, sips.frequency, sips.next_date, holdings.name AS holding_name
+       FROM sips JOIN holdings ON holdings.id = sips.holding_id WHERE sips.is_active = 1 ORDER BY sips.next_date`
+    );
+    setSips(sipRows);
+    const cur = useSettingsStore.getState().displayCurrency;
+    setDisplayRate(cur === 'INR' ? 1 : await fetchExchangeRate('INR', cur));
+    setSnapshots(await getSnapshots(60));
+
+    // Phase 2 — live prices over the network, then update.
+    const enriched = await enrichHoldings(rows, 'INR', force, false);
+    const totVal = apply(enriched);
     if (enriched.some((h) => h.is_live)) setLastUpdated(new Date());
 
-    // Record + load history (canonical INR), with a per-region breakdown.
     const region = { india: 0, europe: 0, other: 0 };
     enriched.forEach((h) => {
       const r = h.geography === 'india' ? 'india' : h.geography === 'europe' ? 'europe' : 'other';
@@ -74,17 +93,7 @@ export default function PortfolioScreen() {
     });
     await recordSnapshot(totVal, region);
     setSnapshots(await getSnapshots(60));
-
-    // Display currency conversion.
-    const { displayCurrency: cur } = useSettingsStore.getState();
-    setDisplayRate(cur === 'INR' ? 1 : await fetchExchangeRate('INR', cur));
-
-    const sipRows = await db.getAllAsync<ActiveSip>(
-      `SELECT sips.id, sips.amount, sips.currency, sips.frequency, sips.next_date, holdings.name AS holding_name
-       FROM sips JOIN holdings ON holdings.id = sips.holding_id WHERE sips.is_active = 1 ORDER BY sips.next_date`
-    );
-    setSips(sipRows);
-  }, [loadSettings]);
+  }, [loadSettings, apply]);
 
   useFocusEffect(useCallback(() => { loadData(false); }, [loadData]));
 
@@ -112,7 +121,7 @@ export default function PortfolioScreen() {
   const allocationData = React.useMemo(() => {
     const by: Record<string, number> = {};
     holdings.forEach((h) => { by[h.asset_class] = (by[h.asset_class] || 0) + h.current_value; });
-    return Object.entries(by).map(([k, v]) => ({ value: v, color: chartColors[k as AssetClass] || '#999', text: k, label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
+    return Object.entries(by).map(([k, v]) => ({ value: v, color: chartColors[k as AssetClass] || '#999', text: prettyLabel(k), label: `${prettyLabel(k)} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
   }, [holdings, totalValue]);
 
   const countryPalette = vibrantPalette;
@@ -140,8 +149,8 @@ export default function PortfolioScreen() {
       .map(([k, v], i) => ({
         value: v,
         color: colorFn(k, i),
-        text: k,
-        label: `${k} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%`,
+        text: prettyLabel(k),
+        label: `${prettyLabel(k)} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%`,
         gainPct: inv[k] > 0 ? (gain[k] / inv[k]) * 100 : 0,
         hasReturn: inv[k] > 0,
       }));
@@ -260,6 +269,8 @@ export default function PortfolioScreen() {
                 yAxisThickness={0}
                 xAxisThickness={0}
                 hideYAxisText={hideValues}
+                formatYLabel={(v: string) => compactNumber(Number(v))}
+                noOfSections={3}
                 yAxisTextStyle={{ color: theme.colors.onSurfaceVariant, fontSize: 9 }}
                 height={120}
                 adjustToWidth
@@ -287,6 +298,8 @@ export default function PortfolioScreen() {
                 yAxisThickness={0}
                 xAxisThickness={0}
                 hideYAxisText={hideValues}
+                formatYLabel={(v: string) => compactNumber(Number(v))}
+                noOfSections={3}
                 yAxisTextStyle={{ color: theme.colors.onSurfaceVariant, fontSize: 9 }}
                 height={120}
                 adjustToWidth
@@ -405,14 +418,19 @@ export default function PortfolioScreen() {
           </Card.Content>
         </Card>
 
-        {/* Holdings */}
+        {/* Top holdings (full list on its own screen) */}
         <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
           <Card.Content>
-            <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 12 }}>Holdings</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <Text variant="titleMedium" style={{ color: theme.colors.onSurface }}>Top Holdings</Text>
+              {holdings.length > 0 && (
+                <Button mode="text" compact onPress={() => router.push('/holdings')}>View all ({holdings.length})</Button>
+              )}
+            </View>
             {holdings.length === 0 ? (
               <Text style={{ color: theme.colors.onSurfaceVariant }}>No holdings yet. Tap + to add your first investment.</Text>
             ) : (
-              holdings.map((h) => (
+              [...holdings].sort((a, b) => b.current_value - a.current_value).slice(0, 5).map((h) => (
                 <Pressable key={h.id} onPress={() => router.push(`/edit-holding?id=${h.id}`)}>
                   <View style={styles.holdingRow}>
                     <View style={{ flex: 1 }}>
@@ -421,8 +439,8 @@ export default function PortfolioScreen() {
                         <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }} numberOfLines={1}>{h.name}</Text>
                       </View>
                       <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-                        <Chip compact textStyle={{ fontSize: 10 }}>{h.asset_type}</Chip>
-                        <Chip compact textStyle={{ fontSize: 10 }}>{h.country || h.geography}</Chip>
+                        <Chip compact textStyle={{ fontSize: 10 }}>{prettyLabel(h.asset_type)}</Chip>
+                        <Chip compact textStyle={{ fontSize: 10 }}>{prettyLabel(h.country || h.geography)}</Chip>
                       </View>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
