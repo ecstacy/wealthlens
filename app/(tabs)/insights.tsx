@@ -16,10 +16,10 @@ export default function InsightsScreen() {
   const [results, setResults] = useState<Record<string, string>>({});
   const [snack, setSnack] = useState('');
 
-  const copyForClaude = async () => {
-    const text = await buildShareText();
+  const copyForClaude = async (anonymized: boolean) => {
+    const text = await buildShareText(anonymized);
     await Clipboard.setStringAsync(text);
-    setSnack('Portfolio summary copied — paste it into a Claude chat.');
+    setSnack(anonymized ? 'Anonymized summary copied (%, no names/amounts).' : 'Full summary copied — paste into a Claude chat.');
   };
   const [hasKey, setHasKey] = useState<boolean | null>(null);
 
@@ -124,15 +124,21 @@ export default function InsightsScreen() {
           </Card.Content>
         </Card>
 
-        <Card style={[styles.card, { backgroundColor: theme.colors.surface }]} onPress={copyForClaude}>
+        <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
           <Card.Content>
             <View style={styles.cardHeader}>
               <Ionicons name="copy-outline" size={24} color={theme.colors.secondary} />
               <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginLeft: 12, flex: 1 }}>Copy Summary for Claude</Text>
-              <Ionicons name="chevron-forward" size={20} color={theme.colors.onSurfaceVariant} />
             </View>
             <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }}>
-              Copy a text summary of your portfolio to paste into a free Claude chat — no API key or cost.
+              Copy your portfolio to paste into a free Claude chat — no API key or cost.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+              <Button mode="contained-tonal" style={{ flex: 1 }} onPress={() => copyForClaude(false)}>Copy full</Button>
+              <Button mode="outlined" style={{ flex: 1 }} onPress={() => copyForClaude(true)}>Copy anonymized</Button>
+            </View>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 10 }}>
+              Note: pasting into claude.ai sends data to Anthropic (like the API). Consumer chats may be used to improve models unless you opt out in Settings → Privacy; the API never trains on your data. "Anonymized" shares only percentages — no names or amounts.
             </Text>
           </Card.Content>
         </Card>

@@ -11,7 +11,7 @@ const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / who
  * Claude chat (claude.ai) for analysis — avoiding API costs. All values are
  * in INR. This is the user's own data; nothing is sent anywhere by this code.
  */
-export async function buildShareText(): Promise<string> {
+export async function buildShareText(anonymized = false): Promise<string> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<Holding>('SELECT * FROM holdings');
   const enriched = await enrichHoldings(rows, 'INR');
@@ -32,9 +32,13 @@ export async function buildShareText(): Promise<string> {
     Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${prettyLabel(k)} ${pct(v, total)}%`).join(', ');
 
   const L: string[] = [];
-  L.push('# My Portfolio Summary (all values INR)');
+  L.push(anonymized ? '# Portfolio Summary (anonymized — percentages only)' : '# My Portfolio Summary (all values INR)');
   L.push('');
-  L.push(`Net worth: ${inr(total)}  |  Invested: ${inr(invested)}  |  Gain: ${inr(total - invested)} (${pct(total - invested, invested)}%)`);
+  if (anonymized) {
+    L.push(`Overall gain: ${pct(total - invested, invested)}%  ·  ${enriched.length} holdings`);
+  } else {
+    L.push(`Net worth: ${inr(total)}  |  Invested: ${inr(invested)}  |  Gain: ${inr(total - invested)} (${pct(total - invested, invested)}%)`);
+  }
   L.push('');
   L.push(`Asset allocation: ${line(byClass)}`);
   L.push(`Country split: ${line(byCountry)}`);
@@ -42,7 +46,12 @@ export async function buildShareText(): Promise<string> {
   L.push('');
   L.push('## Holdings');
   [...enriched].sort((a, b) => b.current_value - a.current_value).forEach((h) => {
-    L.push(`- ${h.name} (${prettyLabel(h.asset_type)}, ${prettyLabel(h.country || h.geography)}): ${inr(h.current_value)}, ${h.gain_loss >= 0 ? '+' : ''}${h.gain_loss_pct.toFixed(1)}%${h.interest_rate ? `, ${h.interest_rate}% p.a.` : ''}`);
+    if (anonymized) {
+      // No names or amounts — type, region, weight, and return only.
+      L.push(`- ${prettyLabel(h.asset_type)} (${prettyLabel(h.country || h.geography)}): ${pct(h.current_value, total)}% of portfolio, ${h.gain_loss >= 0 ? '+' : ''}${h.gain_loss_pct.toFixed(1)}%${h.interest_rate ? `, ${h.interest_rate}% p.a.` : ''}`);
+    } else {
+      L.push(`- ${h.name} (${prettyLabel(h.asset_type)}, ${prettyLabel(h.country || h.geography)}): ${inr(h.current_value)}, ${h.gain_loss >= 0 ? '+' : ''}${h.gain_loss_pct.toFixed(1)}%${h.interest_rate ? `, ${h.interest_rate}% p.a.` : ''}`);
+    }
   });
 
   const sips = await db.getAllAsync<{ amount: number; frequency: string; name: string }>(
@@ -51,7 +60,8 @@ export async function buildShareText(): Promise<string> {
   if (sips.length) {
     L.push('');
     L.push('## Active SIPs');
-    sips.forEach((s) => L.push(`- ${s.name}: ${inr(s.amount)} ${s.frequency}`));
+    if (anonymized) L.push(`${sips.length} active SIPs.`);
+    else sips.forEach((s) => L.push(`- ${s.name}: ${inr(s.amount)} ${s.frequency}`));
   }
 
   // This-month cashflow
@@ -63,14 +73,17 @@ export async function buildShareText(): Promise<string> {
   if (mIncome || mExpense) {
     L.push('');
     L.push('## This month');
-    L.push(`Income ${inr(mIncome)}, Expenses ${inr(mExpense)}, Savings rate ${pct(mIncome - mExpense, mIncome)}%`);
+    L.push(anonymized
+      ? `Savings rate ${pct(mIncome - mExpense, mIncome)}%`
+      : `Income ${inr(mIncome)}, Expenses ${inr(mExpense)}, Savings rate ${pct(mIncome - mExpense, mIncome)}%`);
   }
 
   const goals = await db.getAllAsync<Goal>('SELECT name, target_amount, target_date FROM goals');
   if (goals.length) {
     L.push('');
     L.push('## Goals');
-    goals.forEach((g) => L.push(`- ${g.name}: target ${inr(g.target_amount)} by ${g.target_date}`));
+    if (anonymized) goals.forEach((g) => L.push(`- Goal by ${g.target_date}`));
+    else goals.forEach((g) => L.push(`- ${g.name}: target ${inr(g.target_amount)} by ${g.target_date}`));
   }
 
   L.push('');
