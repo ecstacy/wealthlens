@@ -185,19 +185,6 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        {/* Vault status */}
-        <View style={[styles.card, { backgroundColor: surfaces.low }]}>
-          <Text variant="headlineSmall" style={{ color: theme.colors.onSurface, marginBottom: 4 }}>Vault Status</Text>
-          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>Your assets are monitored and encrypted.</Text>
-          {['Encrypted on-device', 'Biometric / PIN lock', 'Privacy-first (values hidden)'].map((t) => (
-            <View key={t} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <Ionicons name="checkmark-circle" size={18} color={theme.colors.secondary} />
-              <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>{t}</Text>
-            </View>
-          ))}
-          <Text style={{ color: theme.colors.secondary, fontWeight: '700', fontSize: 12, letterSpacing: 1, textAlign: 'center', marginTop: 8 }}>● SECURE & ACTIVE</Text>
-        </View>
-
         <View style={{ height: 24 }} />
       </ScrollView>
 
