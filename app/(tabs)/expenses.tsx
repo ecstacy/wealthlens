@@ -8,6 +8,7 @@ import { expenseCategories } from '../../src/theme';
 import { useMoney } from '../../src/hooks/useMoney';
 import { prettyLabel, compactNumber } from '../../src/utils/labels';
 import MoneyControls from '../../src/components/MoneyControls';
+import ScreenHeader from '../../src/components/ScreenHeader';
 import type { Expense } from '../../src/types';
 
 export default function ExpensesScreen() {
@@ -65,6 +66,7 @@ export default function ExpensesScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <ScreenHeader title="Expenses" />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}

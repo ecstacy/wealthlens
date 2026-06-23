@@ -1,485 +1,228 @@
 import React, { useState, useCallback } from 'react';
 import { View, ScrollView, StyleSheet, RefreshControl, Pressable } from 'react-native';
-import { Text, Card, FAB, useTheme, Chip, Divider, IconButton, Menu, Button } from 'react-native-paper';
-import { LineChart } from 'react-native-gifted-charts';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Text, useTheme, Divider } from 'react-native-paper';
+import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { getDatabase } from '../../src/db/database';
-import { enrichHoldings, fetchExchangeRate, type EnrichedHolding } from '../../src/services/market';
-import { recordSnapshot, getSnapshots, type Snapshot } from '../../src/services/snapshots';
+import { enrichHoldings, type EnrichedHolding } from '../../src/services/market';
+import { recordSnapshot, getSnapshots } from '../../src/services/snapshots';
 import { useSettingsStore } from '../../src/stores/settingsStore';
-import { chartColors, vibrantPalette } from '../../src/theme';
-import DonutChart from '../../src/components/DonutChart';
-import { prettyLabel, compactNumber } from '../../src/utils/labels';
-import type { Holding, AssetClass, Currency } from '../../src/types';
+import { useMoney } from '../../src/hooks/useMoney';
+import { prettyLabel } from '../../src/utils/labels';
+import ScreenHeader from '../../src/components/ScreenHeader';
+import { surfaces, MONO } from '../../src/theme';
+import type { Holding } from '../../src/types';
 
-interface ActiveSip {
-  id: number;
-  amount: number;
-  currency: string;
-  frequency: 'weekly' | 'monthly' | 'quarterly';
-  next_date: string;
-  holding_name: string;
-}
+const GAIN = '#4EDEA3';
+const LOSS = '#FFB4AB';
 
-const GAIN = '#22c55e';
-const LOSS = '#ef4444';
-const LOCALES: Record<Currency, string> = { INR: 'en-IN', EUR: 'de-DE', USD: 'en-US', GBP: 'en-GB' };
-
-export default function PortfolioScreen() {
+export default function HomeScreen() {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
-  const { hideValues, displayCurrency, loadSettings, setHideValues, setDisplayCurrency } = useSettingsStore();
+  const { hideValues, loadSettings } = useSettingsStore();
+  const { fmt } = useMoney();
 
   const [holdings, setHoldings] = useState<EnrichedHolding[]>([]);
-  const [sips, setSips] = useState<ActiveSip[]>([]);
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [recent, setRecent] = useState<Holding[]>([]);
+  const [total, setTotal] = useState(0);
+  const [invested, setInvested] = useState(0);
+  const [sipCount, setSipCount] = useState(0);
+  const [sipMonthly, setSipMonthly] = useState(0);
+  const [vsMonth, setVsMonth] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [totalValue, setTotalValue] = useState(0); // INR
-  const [totalInvested, setTotalInvested] = useState(0); // INR
-  const [cagr, setCagr] = useState<number | null>(null);
-  const [displayRate, setDisplayRate] = useState(1);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [curMenu, setCurMenu] = useState(false);
 
-  // Apply an enriched dataset to all the derived UI state.
-  const apply = useCallback((enriched: EnrichedHolding[]) => {
-    setHoldings(enriched);
-    const totVal = enriched.reduce((s, h) => s + h.current_value, 0);
-    const totInv = enriched.reduce((s, h) => s + h.invested_value, 0);
-    setTotalValue(totVal);
-    setTotalInvested(totInv);
-    const now = Date.now();
-    let wYears = 0;
-    enriched.forEach((h) => {
-      const years = Math.max((now - new Date(h.created_at).getTime()) / (365.25 * 86400000), 1 / 365);
-      wYears += years * h.invested_value;
-    });
-    const avgYears = totInv > 0 ? wYears / totInv : 0;
-    setCagr(totInv > 0 && avgYears > 0.08 && totVal > 0 ? (Math.pow(totVal / totInv, 1 / avgYears) - 1) * 100 : null);
-    return totVal;
-  }, []);
-
-  const loadData = useCallback(async (force = false) => {
+  const load = useCallback(async (force = false) => {
     await loadSettings();
     const db = await getDatabase();
-    const rows = await db.getAllAsync<Holding>('SELECT * FROM holdings ORDER BY asset_class, name');
+    const rows = await db.getAllAsync<Holding>('SELECT * FROM holdings ORDER BY created_at DESC');
+    setRecent(rows.slice(0, 3));
 
-    // Phase 1 — instant paint from cache (no network), unless forcing a refresh.
-    if (!force) {
-      apply(await enrichHoldings(rows, 'INR', false, true));
-    }
+    const apply = (e: EnrichedHolding[]) => {
+      setHoldings(e);
+      setTotal(e.reduce((s, h) => s + h.current_value, 0));
+      setInvested(e.reduce((s, h) => s + h.invested_value, 0));
+    };
+    if (!force) apply(await enrichHoldings(rows, 'INR', false, true)); // instant from cache
 
-    // SIPs + display rate (quick).
-    const sipRows = await db.getAllAsync<ActiveSip>(
-      `SELECT sips.id, sips.amount, sips.currency, sips.frequency, sips.next_date, holdings.name AS holding_name
-       FROM sips JOIN holdings ON holdings.id = sips.holding_id WHERE sips.is_active = 1 ORDER BY sips.next_date`
-    );
-    setSips(sipRows);
-    const cur = useSettingsStore.getState().displayCurrency;
-    setDisplayRate(cur === 'INR' ? 1 : await fetchExchangeRate('INR', cur));
-    setSnapshots(await getSnapshots(60));
+    const sips = await db.getAllAsync<{ amount: number; frequency: string }>('SELECT amount, frequency FROM sips WHERE is_active = 1');
+    setSipCount(sips.length);
+    setSipMonthly(sips.reduce((s, x) => s + x.amount * (x.frequency === 'weekly' ? 52 / 12 : x.frequency === 'quarterly' ? 1 / 3 : 1), 0));
 
-    // Phase 2 — live prices over the network, then update.
     const enriched = await enrichHoldings(rows, 'INR', force, false);
-    const totVal = apply(enriched);
-    if (enriched.some((h) => h.is_live)) setLastUpdated(new Date());
+    apply(enriched);
+    const tot = enriched.reduce((s, h) => s + h.current_value, 0);
 
     const region = { india: 0, europe: 0, other: 0 };
-    enriched.forEach((h) => {
-      const r = h.geography === 'india' ? 'india' : h.geography === 'europe' ? 'europe' : 'other';
-      region[r] += h.current_value;
-    });
-    await recordSnapshot(totVal, region);
-    setSnapshots(await getSnapshots(60));
-  }, [loadSettings, apply]);
+    enriched.forEach((h) => { region[h.geography === 'india' ? 'india' : h.geography === 'europe' ? 'europe' : 'other'] += h.current_value; });
+    await recordSnapshot(tot, region);
 
-  useFocusEffect(useCallback(() => { loadData(false); }, [loadData]));
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadData(true);
-    setRefreshing(false);
-  };
-
-  const totalGain = totalValue - totalInvested;
-  const totalGainPct = totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0;
-
-  const monthlyCommitment = sips.reduce((s, sip) => {
-    const f = sip.frequency === 'weekly' ? 52 / 12 : sip.frequency === 'quarterly' ? 1 / 3 : 1;
-    return s + sip.amount * f;
-  }, 0);
-
-  // format an INR amount into the chosen display currency, honoring privacy.
-  const fmt = (inr: number) => {
-    if (hideValues) return '••••••';
-    const val = inr * displayRate;
-    return new Intl.NumberFormat(LOCALES[displayCurrency], { style: 'currency', currency: displayCurrency, maximumFractionDigits: 0 }).format(val);
-  };
-
-  const allocationData = React.useMemo(() => {
-    const by: Record<string, number> = {};
-    holdings.forEach((h) => { by[h.asset_class] = (by[h.asset_class] || 0) + h.current_value; });
-    return Object.entries(by).map(([k, v]) => ({ value: v, color: chartColors[k as AssetClass] || '#999', text: prettyLabel(k), label: `${prettyLabel(k)} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%` }));
-  }, [holdings, totalValue]);
-
-  const countryPalette = vibrantPalette;
-
-  // Center label (dominant slice) for a donut dataset.
-  const centerOf = (data: { value: number; text: string }[]) => {
-    const tot = data.reduce((s, d) => s + d.value, 0);
-    const top = [...data].sort((a, b) => b.value - a.value)[0];
-    return { value: top && tot > 0 ? `${Math.round((top.value / tot) * 100)}%` : '', title: top?.text ?? '' };
-  };
-
-  // Group current value, invested value and gain by a key → slices with return %.
-  const groupBy = (keyFn: (h: EnrichedHolding) => string, colorFn: (k: string, i: number) => string) => {
-    const val: Record<string, number> = {};
-    const inv: Record<string, number> = {};
-    const gain: Record<string, number> = {};
-    holdings.forEach((h) => {
-      const k = keyFn(h);
-      val[k] = (val[k] || 0) + h.current_value;
-      inv[k] = (inv[k] || 0) + h.invested_value;
-      gain[k] = (gain[k] || 0) + h.gain_loss;
-    });
-    return Object.entries(val)
-      .sort((a, b) => b[1] - a[1])
-      .map(([k, v], i) => ({
-        value: v,
-        color: colorFn(k, i),
-        text: prettyLabel(k),
-        label: `${prettyLabel(k)} ${totalValue > 0 ? Math.round((v / totalValue) * 100) : 0}%`,
-        gainPct: inv[k] > 0 ? (gain[k] / inv[k]) * 100 : 0,
-        hasReturn: inv[k] > 0,
-      }));
-  };
-
-  const countryData = React.useMemo(
-    () => groupBy((h) => h.country || h.geography, (_, i) => countryPalette[i % countryPalette.length]),
-    [holdings, totalValue]
-  );
-
-  const currencyColors: Record<string, string> = { INR: '#FF9933', EUR: '#003399', USD: '#22c55e', GBP: '#B07CFF' };
-  const currencyData = React.useMemo(
-    () => groupBy((h) => h.currency, (k) => currencyColors[k] || '#9BA3B5'),
-    [holdings, totalValue]
-  );
-
-  const trend = React.useMemo(
-    () => snapshots.map((s) => ({ value: s.value_inr * displayRate })),
-    [snapshots, displayRate]
-  );
-
-  // Region trendline (India vs Europe vs Other) from snapshots that carry a breakdown.
-  const regionTrend = React.useMemo(() => {
-    const parsed = snapshots
-      .filter((s) => s.breakdown)
-      .map((s) => JSON.parse(s.breakdown as string) as { india?: number; europe?: number; other?: number });
-    if (parsed.length < 2) return null;
-    const series = (key: 'india' | 'europe' | 'other', color: string) => ({
-      data: parsed.map((p) => ({ value: (p[key] || 0) * displayRate })),
-      color,
-    });
-    const sets = [series('india', '#FF9933'), series('europe', '#003399')];
-    if (parsed.some((p) => (p.other || 0) > 0)) sets.push(series('other', '#4ECDC4'));
-    return sets;
-  }, [snapshots, displayRate]);
-
-  // Rule-based currency-hedging tip.
-  const hedgeTip = React.useMemo(() => {
-    if (currencyData.length < 2 || totalValue <= 0) return null;
-    const top = currencyData[0];
-    const topShare = Math.round((top.value / totalValue) * 100);
-    const foreign = currencyData.filter((c) => c.text !== 'INR').reduce((s, c) => s + c.value, 0);
-    const foreignShare = Math.round((foreign / totalValue) * 100);
-    if (topShare >= 75) {
-      return `${topShare}% of your portfolio is in ${top.text}. That's a concentrated currency bet — a swing in ${top.text} moves most of your wealth. Consider diversifying across currencies or holding a buffer in the currency you spend in.`;
+    const snaps = await getSnapshots(90);
+    if (snaps.length > 1 && tot > 0) {
+      const cutoff = Date.now() - 28 * 86400000;
+      const past = snaps.filter((s) => new Date(s.date).getTime() <= cutoff).pop() ?? snaps[0];
+      if (past && past.value_inr > 0) setVsMonth(((tot - past.value_inr) / past.value_inr) * 100);
     }
-    if (foreignShare >= 25) {
-      return `${foreignShare}% sits outside INR. Currency moves can meaningfully change INR-denominated returns. Keep an emergency buffer in your day-to-day spending currency, and consider this exposure when rebalancing.`;
-    }
-    return null;
-  }, [currencyData, totalValue]);
+  }, [loadSettings]);
+
+  useFocusEffect(useCallback(() => { load(false); }, [load]));
+  const onRefresh = async () => { setRefreshing(true); await load(true); setRefreshing(false); };
+
+  const byClass = React.useMemo(() => {
+    const m: Record<string, number> = {};
+    holdings.forEach((h) => { m[h.asset_class] = (m[h.asset_class] || 0) + h.current_value; });
+    return m;
+  }, [holdings]);
+
+  const regions = React.useMemo(() => {
+    const m: Record<string, number> = {};
+    holdings.forEach((h) => { const k = h.country || h.geography; m[k] = (m[k] || 0) + h.current_value; });
+    return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 2);
+  }, [holdings]);
+
+  const Dots = () => (
+    <View style={{ flexDirection: 'row', gap: 6, marginVertical: 6 }}>
+      {[...Array(7)].map((_, i) => <View key={i} style={styles.dot} />)}
+    </View>
+  );
+
+  const CategoryCard = ({ icon, label, title, value }: { icon: any; label: string; title: string; value: string }) => (
+    <View style={[styles.catCard, { backgroundColor: surfaces.base }]}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <View style={[styles.iconWrap, { backgroundColor: surfaces.high }]}>
+          <Ionicons name={icon} size={16} color={theme.colors.onSurfaceVariant} />
+        </View>
+        <Text style={styles.caps}>{label}</Text>
+      </View>
+      <Text variant="bodyMedium" style={{ color: theme.colors.onSurface, marginTop: 12 }}>{title}</Text>
+      <Text style={{ color: theme.colors.onSurface, fontFamily: MONO, fontSize: 15, marginTop: 2 }}>{value}</Text>
+    </View>
+  );
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <ScreenHeader title="WealthLens" brand showEye showSettings />
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 12 }]}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
+        contentContainerStyle={styles.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.secondary} />}
       >
-        {/* HERO */}
-        <LinearGradient colors={['#22305C', '#141B2E']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text variant="labelLarge" style={{ color: '#A9B4D0' }}>Net Worth</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Menu
-                visible={curMenu}
-                onDismiss={() => setCurMenu(false)}
-                anchor={<Button compact textColor="#A9B4D0" onPress={() => setCurMenu(true)} icon="chevron-down" contentStyle={{ flexDirection: 'row-reverse' }}>{displayCurrency}</Button>}
-              >
-                {(['INR', 'EUR', 'USD', 'GBP'] as Currency[]).map((c) => (
-                  <Menu.Item key={c} title={c} onPress={async () => { setCurMenu(false); await setDisplayCurrency(c); loadData(false); }} />
-                ))}
-              </Menu>
-              <IconButton icon={hideValues ? 'eye-off' : 'eye'} iconColor="#A9B4D0" size={20} onPress={() => setHideValues(!hideValues)} />
-              <IconButton icon="cog-outline" iconColor="#A9B4D0" size={20} onPress={() => router.push('/settings')} />
-            </View>
-          </View>
-
-          <Text variant="displaySmall" style={{ color: '#FFFFFF', fontWeight: '800' }}>{fmt(totalValue)}</Text>
-
-          {totalInvested > 0 && (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-              <View style={[styles.pill, { backgroundColor: totalGain >= 0 ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)' }]}>
-                <Text style={{ color: totalGain >= 0 ? GAIN : LOSS, fontWeight: '600' }}>
-                  {totalGain >= 0 ? '▲' : '▼'} {fmt(Math.abs(totalGain))} ({totalGainPct >= 0 ? '+' : ''}{totalGainPct.toFixed(1)}%)
+        {/* Net worth */}
+        <View style={[styles.card, { backgroundColor: surfaces.low }]}>
+          <Text style={styles.caps}>TOTAL NET WORTH</Text>
+          {hideValues ? <Dots /> : (
+            <Text style={{ color: theme.colors.onSurface, fontFamily: MONO, fontSize: 32, marginVertical: 4 }}>{fmt(total)}</Text>
+          )}
+          {vsMonth != null && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+              <View style={[styles.pill, { backgroundColor: 'rgba(78,222,163,0.15)' }]}>
+                <Ionicons name={vsMonth >= 0 ? 'trending-up' : 'trending-down'} size={12} color={vsMonth >= 0 ? GAIN : LOSS} />
+                <Text style={{ color: vsMonth >= 0 ? GAIN : LOSS, fontWeight: '700', fontSize: 12 }}>
+                  {vsMonth >= 0 ? '+' : ''}{vsMonth.toFixed(1)}%
                 </Text>
               </View>
-              {cagr != null && (
-                <View style={[styles.pill, { backgroundColor: 'rgba(108,156,255,0.18)' }]}>
-                  <Text style={{ color: '#9DBEFF', fontWeight: '600' }}>Est. CAGR {cagr >= 0 ? '+' : ''}{cagr.toFixed(1)}%</Text>
-                </View>
-              )}
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>vs last month</Text>
             </View>
           )}
-          <Text variant="labelSmall" style={{ color: '#6E7A99', marginTop: 8 }}>
-            {refreshing ? 'Updating prices…' : lastUpdated ? `Live · updated ${lastUpdated.toLocaleTimeString()}` : 'Pull down to refresh prices'}
-          </Text>
-        </LinearGradient>
 
-        {/* TRENDLINE */}
-        <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
-          <Card.Content>
-            <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 8 }}>Performance</Text>
-            {trend.length >= 2 ? (
-              <LineChart
-                data={trend}
-                areaChart
-                curved
-                hideDataPoints
-                color={theme.colors.primary}
-                startFillColor={theme.colors.primary}
-                endFillColor={theme.colors.surface}
-                startOpacity={0.35}
-                endOpacity={0.02}
-                thickness={2}
-                hideRules
-                yAxisThickness={0}
-                xAxisThickness={0}
-                hideYAxisText={hideValues}
-                formatYLabel={(v: string) => compactNumber(Number(v))}
-                noOfSections={3}
-                yAxisTextStyle={{ color: theme.colors.onSurfaceVariant, fontSize: 9 }}
-                height={120}
-                adjustToWidth
-                initialSpacing={0}
-                disableScroll
-              />
-            ) : (
-              <Text style={{ color: theme.colors.onSurfaceVariant }}>
-                Building history — your net worth is recorded each time you open this screen. Check back over the coming days to see the trend.
-              </Text>
-            )}
-          </Card.Content>
-        </Card>
-
-        {regionTrend && (
-          <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
-            <Card.Content>
-              <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 8 }}>Performance by Region</Text>
-              <LineChart
-                dataSet={regionTrend}
-                curved
-                hideDataPoints
-                thickness={2}
-                hideRules
-                yAxisThickness={0}
-                xAxisThickness={0}
-                hideYAxisText={hideValues}
-                formatYLabel={(v: string) => compactNumber(Number(v))}
-                noOfSections={3}
-                yAxisTextStyle={{ color: theme.colors.onSurfaceVariant, fontSize: 9 }}
-                height={120}
-                adjustToWidth
-                initialSpacing={0}
-                disableScroll
-              />
-              <View style={{ flexDirection: 'row', gap: 16, marginTop: 8 }}>
-                <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#FF9933' }]} /><Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>India</Text></View>
-                <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#003399' }]} /><Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>Europe</Text></View>
-                <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: '#4ECDC4' }]} /><Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>Other</Text></View>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
-
-        {allocationData.length > 0 && (
-          <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
-            <Card.Content>
-              <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 16 }}>Asset Allocation</Text>
-              <View style={styles.chartRow}>
-                <DonutChart data={allocationData} centerValue={centerOf(allocationData).value} centerTitle={centerOf(allocationData).title} />
-                <View style={styles.legendCol}>
-                  {allocationData.map((d) => (
-                    <View key={d.text} style={styles.legendItem}>
-                      <View style={[styles.legendDot, { backgroundColor: d.color }]} />
-                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{d.label}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
-
-        {countryData.length > 0 && (
-          <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
-            <Card.Content>
-              <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 16 }}>Country Split</Text>
-              <View style={styles.chartRow}>
-                <DonutChart data={countryData} centerValue={centerOf(countryData).value} centerTitle={centerOf(countryData).title} />
-                <View style={styles.legendCol}>
-                  {countryData.map((d) => (
-                    <View key={d.text} style={styles.legendItem}>
-                      <View style={[styles.legendDot, { backgroundColor: d.color }]} />
-                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{d.label}</Text>
-                      {d.hasReturn && (
-                        <Text variant="bodySmall" style={{ color: d.gainPct >= 0 ? GAIN : LOSS }}>
-                          {d.gainPct >= 0 ? '+' : ''}{d.gainPct.toFixed(1)}%
-                        </Text>
-                      )}
-                    </View>
-                  ))}
-                </View>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
-
-        {currencyData.length > 0 && (
-          <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
-            <Card.Content>
-              <Text variant="titleMedium" style={{ color: theme.colors.onSurface, marginBottom: 16 }}>Currency Split</Text>
-              <View style={styles.chartRow}>
-                <DonutChart data={currencyData} centerValue={centerOf(currencyData).value} centerTitle={centerOf(currencyData).title} />
-                <View style={styles.legendCol}>
-                  {currencyData.map((d) => (
-                    <View key={d.text} style={styles.legendItem}>
-                      <View style={[styles.legendDot, { backgroundColor: d.color }]} />
-                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{d.label}</Text>
-                      {d.hasReturn && (
-                        <Text variant="bodySmall" style={{ color: d.gainPct >= 0 ? GAIN : LOSS }}>
-                          {d.gainPct >= 0 ? '+' : ''}{d.gainPct.toFixed(1)}%
-                        </Text>
-                      )}
-                    </View>
-                  ))}
-                </View>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
-
-        {/* Currency hedging tip */}
-        {hedgeTip && !hideValues && (
-          <Card style={[styles.card, { backgroundColor: theme.colors.tertiaryContainer }]}>
-            <Card.Content style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
-              <IconButton icon="swap-horizontal" size={20} iconColor={theme.colors.tertiary} style={{ margin: 0 }} />
-              <Text variant="bodySmall" style={{ color: theme.colors.onSurface, flex: 1 }}>{hedgeTip}</Text>
-            </Card.Content>
-          </Card>
-        )}
-
-        {/* SIPs */}
-        <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
-          <Card.Content>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text variant="titleMedium" style={{ color: theme.colors.onSurface }}>SIPs</Text>
-              <Button mode="text" compact onPress={() => router.push('/add-sip')}>+ Add SIP</Button>
-            </View>
-            {sips.length === 0 ? (
-              <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>No active SIPs. Add one to track recurring investments.</Text>
-            ) : (
-              <>
-                <Text variant="bodyMedium" style={{ color: theme.colors.primary, marginTop: 4, marginBottom: 8 }}>≈ {fmt(monthlyCommitment)}/month committed</Text>
-                {sips.map((s) => (
-                  <Pressable key={s.id} onPress={() => router.push(`/add-sip?id=${s.id}`)} style={styles.holdingRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }} numberOfLines={1}>{s.holding_name}</Text>
-                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{s.frequency} · next {s.next_date}</Text>
-                    </View>
-                    <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>{fmt(s.amount)}</Text>
-                  </Pressable>
-                ))}
-              </>
-            )}
-          </Card.Content>
-        </Card>
-
-        {/* Top holdings (full list on its own screen) */}
-        <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
-          <Card.Content>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <Text variant="titleMedium" style={{ color: theme.colors.onSurface }}>Top Holdings</Text>
-              {holdings.length > 0 && (
-                <Button mode="text" compact onPress={() => router.push('/holdings')}>View all ({holdings.length})</Button>
-              )}
-            </View>
-            {holdings.length === 0 ? (
-              <Text style={{ color: theme.colors.onSurfaceVariant }}>No holdings yet. Tap + to add your first investment.</Text>
-            ) : (
-              [...holdings].sort((a, b) => b.current_value - a.current_value).slice(0, 5).map((h) => (
-                <Pressable key={h.id} onPress={() => router.push(`/edit-holding?id=${h.id}`)}>
-                  <View style={styles.holdingRow}>
-                    <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        {h.is_live && <View style={[styles.liveDot, { backgroundColor: GAIN }]} />}
-                        <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }} numberOfLines={1}>{h.name}</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-                        <Chip compact textStyle={{ fontSize: 10 }}>{prettyLabel(h.asset_type)}</Chip>
-                        <Chip compact textStyle={{ fontSize: 10 }}>{prettyLabel(h.country || h.geography)}</Chip>
-                      </View>
-                    </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }}>{fmt(h.current_value)}</Text>
-                      {h.is_live ? (
-                        <Text variant="bodySmall" style={{ color: h.gain_loss >= 0 ? GAIN : LOSS }}>
-                          {h.gain_loss >= 0 ? '+' : ''}{h.gain_loss_pct.toFixed(1)}%{h.change_pct != null ? ` · ${h.change_pct >= 0 ? '+' : ''}${h.change_pct.toFixed(1)}% today` : ''}
-                        </Text>
-                      ) : (
-                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{hideValues ? '•••' : `${h.currency}`}</Text>
-                      )}
-                    </View>
+          {/* Region mini-cards */}
+          {regions.length > 0 && (
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+              {regions.map(([name, val]) => (
+                <View key={name} style={[styles.regionCard, { backgroundColor: surfaces.lowest }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>{prettyLabel(name)}</Text>
+                    <Ionicons name="globe-outline" size={14} color={theme.colors.onSurfaceVariant} />
                   </View>
-                  <Divider style={{ backgroundColor: theme.colors.outline, marginVertical: 8 }} />
-                </Pressable>
-              ))
-            )}
-          </Card.Content>
-        </Card>
+                  {hideValues
+                    ? <View style={{ flexDirection: 'row', gap: 4, marginVertical: 8 }}>{[...Array(4)].map((_, i) => <View key={i} style={styles.dotSm} />)}</View>
+                    : <Text style={{ color: theme.colors.onSurface, fontFamily: MONO, fontSize: 14, marginVertical: 6 }}>{fmt(val)}</Text>}
+                  <View style={styles.track}><View style={[styles.fill, { width: `${total > 0 ? Math.min((val / total) * 100, 100) : 0}%`, backgroundColor: theme.colors.secondary }]} /></View>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
 
-        <View style={{ height: 80 }} />
+        {/* Category grid */}
+        <View style={styles.grid}>
+          <CategoryCard icon="wallet-outline" label="LIQUID" title="Cash Reserves" value={fmt(byClass.cash || 0)} />
+          <CategoryCard icon="stats-chart-outline" label="HIGH RISK" title="Equities" value={fmt(byClass.equity || 0)} />
+          <CategoryCard icon="sync-outline" label="ACTIVE" title={`SIPs (${sipCount})`} value={fmt(sipMonthly)} />
+          <CategoryCard icon="home-outline" label="ILLIQUID" title="Real Estate / Other" value={fmt((byClass.real_estate || 0) + (byClass.gold || 0) + (byClass.debt || 0))} />
+        </View>
+
+        {/* Quick actions (Income / Expenses live here now) */}
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <Pressable style={[styles.action, { backgroundColor: surfaces.base }]} onPress={() => router.push('/income')}>
+            <Ionicons name="trending-up-outline" size={18} color={theme.colors.secondary} />
+            <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>Income</Text>
+          </Pressable>
+          <Pressable style={[styles.action, { backgroundColor: surfaces.base }]} onPress={() => router.push('/expenses')}>
+            <Ionicons name="card-outline" size={18} color={theme.colors.error} />
+            <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>Expenses</Text>
+          </Pressable>
+        </View>
+
+        {/* Recent activity */}
+        <View style={[styles.card, { backgroundColor: surfaces.low }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text variant="titleMedium" style={{ color: theme.colors.onSurface }}>Recent Holdings</Text>
+            {holdings.length > 0 && <Pressable onPress={() => router.push('/holdings')}><Text style={{ color: theme.colors.secondary }}>View All</Text></Pressable>}
+          </View>
+          {recent.length === 0 ? (
+            <Text style={{ color: theme.colors.onSurfaceVariant }}>No holdings yet. Tap + to add your first investment.</Text>
+          ) : recent.map((h, i) => (
+            <View key={h.id}>
+              <Pressable style={styles.activityRow} onPress={() => router.push(`/edit-holding?id=${h.id}`)}>
+                <View style={[styles.iconWrap, { backgroundColor: surfaces.high }]}>
+                  <Ionicons name="cube-outline" size={16} color={theme.colors.onSurfaceVariant} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }} numberOfLines={1}>{h.name}</Text>
+                  <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>{prettyLabel(h.asset_type)} · {prettyLabel(h.country || h.geography)}</Text>
+                </View>
+              </Pressable>
+              {i < recent.length - 1 && <Divider style={{ backgroundColor: theme.colors.outline, opacity: 0.5 }} />}
+            </View>
+          ))}
+        </View>
+
+        {/* Vault status */}
+        <View style={[styles.card, { backgroundColor: surfaces.low }]}>
+          <Text variant="headlineSmall" style={{ color: theme.colors.onSurface, marginBottom: 4 }}>Vault Status</Text>
+          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>Your assets are monitored and encrypted.</Text>
+          {['Encrypted on-device', 'Biometric / PIN lock', 'Privacy-first (values hidden)'].map((t) => (
+            <View key={t} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Ionicons name="checkmark-circle" size={18} color={theme.colors.secondary} />
+              <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>{t}</Text>
+            </View>
+          ))}
+          <Text style={{ color: theme.colors.secondary, fontWeight: '700', fontSize: 12, letterSpacing: 1, textAlign: 'center', marginTop: 8 }}>● SECURE & ACTIVE</Text>
+        </View>
+
+        <View style={{ height: 24 }} />
       </ScrollView>
 
-      <FAB icon="plus" style={[styles.fab, { backgroundColor: theme.colors.primary }]} color={theme.colors.onPrimary} onPress={() => router.push('/add-holding')} />
+      <Pressable style={[styles.fab, { backgroundColor: theme.colors.secondary }]} onPress={() => router.push('/add-holding')}>
+        <Ionicons name="add" size={28} color={theme.colors.onSecondary} />
+      </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
   scroll: { padding: 16, gap: 16 },
-  hero: { borderRadius: 20, padding: 20 },
-  pill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  card: { borderRadius: 16 },
-  chartRow: { flexDirection: 'row', alignItems: 'center', gap: 24 },
-  legendCol: { flex: 1, gap: 6 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  legendDot: { width: 10, height: 10, borderRadius: 5 },
-  liveDot: { width: 7, height: 7, borderRadius: 4 },
-  holdingRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
-  fab: { position: 'absolute', right: 16, bottom: 16 },
+  card: { borderRadius: 12, padding: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.04)' },
+  caps: { color: '#8F9098', fontSize: 11, fontWeight: '700', letterSpacing: 1, fontFamily: 'Inter_700Bold' },
+  dot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#44474D' },
+  dotSm: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#44474D' },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  regionCard: { flex: 1, borderRadius: 10, padding: 12 },
+  track: { height: 4, borderRadius: 2, backgroundColor: '#2D3449', overflow: 'hidden' },
+  fill: { height: 4, borderRadius: 2 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  catCard: { width: '47.5%', flexGrow: 1, borderRadius: 12, padding: 14 },
+  iconWrap: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  caps2: {},
+  action: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 12 },
+  activityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  fab: { position: 'absolute', right: 16, bottom: 80, width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', elevation: 4 },
 });

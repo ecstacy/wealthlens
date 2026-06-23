@@ -7,6 +7,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import { analysePortfolio, analyseOverlaps, forecastReturns } from '../../src/services/analysis';
 import { buildShareText } from '../../src/services/shareSummary';
+import ScreenHeader from '../../src/components/ScreenHeader';
 
 type AnalysisType = 'portfolio' | 'overlaps' | 'forecast' | 'rebalance' | 'tax';
 
@@ -97,6 +98,7 @@ export default function InsightsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <ScreenHeader title="Analysis" />
       <ScrollView contentContainerStyle={styles.scroll}>
         <Card style={[styles.card, { backgroundColor: theme.colors.primaryContainer }]}>
           <Card.Content style={{ alignItems: 'center', paddingVertical: 24 }}>

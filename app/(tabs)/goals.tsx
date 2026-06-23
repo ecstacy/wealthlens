@@ -6,6 +6,7 @@ import { getDatabase } from '../../src/db/database';
 import { enrichHoldings, fetchExchangeRate } from '../../src/services/market';
 import { useMoney } from '../../src/hooks/useMoney';
 import MoneyControls from '../../src/components/MoneyControls';
+import ScreenHeader from '../../src/components/ScreenHeader';
 import type { Goal, Holding } from '../../src/types';
 
 export default function GoalsScreen() {
@@ -54,6 +55,7 @@ export default function GoalsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <ScreenHeader title="Forecast" />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}

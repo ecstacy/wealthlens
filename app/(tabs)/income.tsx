@@ -8,6 +8,7 @@ import { enrichHoldings } from '../../src/services/market';
 import { useMoney } from '../../src/hooks/useMoney';
 import { prettyLabel } from '../../src/utils/labels';
 import MoneyControls from '../../src/components/MoneyControls';
+import ScreenHeader from '../../src/components/ScreenHeader';
 import type { Income, Expense, Holding } from '../../src/types';
 
 interface MonthStat { key: string; label: string; income: number; expenses: number; rate: number; }
@@ -90,6 +91,7 @@ export default function IncomeScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <ScreenHeader title="Income & Cashflow" />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
