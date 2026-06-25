@@ -84,17 +84,20 @@ export default function HomeScreen() {
     </View>
   );
 
-  const CategoryCard = ({ icon, label, title, value }: { icon: any; label: string; title: string; value: string }) => (
-    <View style={[styles.catCard, { backgroundColor: surfaces.base }]}>
+  const CategoryCard = ({ icon, label, title, value, onPress }: { icon: any; label: string; title: string; value: string; onPress?: () => void }) => (
+    <Pressable style={[styles.catCard, { backgroundColor: surfaces.base }]} onPress={onPress} disabled={!onPress}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <View style={[styles.iconWrap, { backgroundColor: surfaces.high }]}>
           <Ionicons name={icon} size={16} color={theme.colors.onSurfaceVariant} />
         </View>
         <Text style={styles.caps}>{label}</Text>
       </View>
-      <Text variant="bodyMedium" style={{ color: theme.colors.onSurface, marginTop: 12 }}>{title}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12 }}>
+        <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>{title}</Text>
+        {onPress && <Ionicons name="chevron-forward" size={13} color={theme.colors.onSurfaceVariant} />}
+      </View>
       <Text style={{ color: theme.colors.onSurface, fontFamily: MONO, fontSize: 15, marginTop: 2 }}>{value}</Text>
-    </View>
+    </Pressable>
   );
 
   return (
@@ -145,7 +148,7 @@ export default function HomeScreen() {
         <View style={styles.grid}>
           <CategoryCard icon="wallet-outline" label="LIQUID" title="Cash Reserves" value={fmt(byClass.cash || 0)} />
           <CategoryCard icon="stats-chart-outline" label="HIGH RISK" title="Equities" value={fmt(byClass.equity || 0)} />
-          <CategoryCard icon="sync-outline" label="ACTIVE" title={`SIPs (${sipCount})`} value={fmt(sipMonthly)} />
+          <CategoryCard icon="sync-outline" label="ACTIVE" title={`SIPs (${sipCount})`} value={fmt(sipMonthly)} onPress={() => router.push('/sips')} />
           <CategoryCard icon="home-outline" label="ILLIQUID" title="Real Estate / Other" value={fmt((byClass.real_estate || 0) + (byClass.gold || 0) + (byClass.debt || 0))} />
         </View>
 
