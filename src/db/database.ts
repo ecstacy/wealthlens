@@ -1,14 +1,26 @@
 import * as SQLite from 'expo-sqlite';
 
-let db: SQLite.SQLiteDatabase | null = null;
+// Single shared connection. We memoize the *promise* (not just the resolved
+// handle) so concurrent callers during startup all await the same open +
+// migration, instead of each racing to open its own connection.
+let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
-export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
-  if (db) return db;
-  db = await SQLite.openDatabaseAsync('wealthlens.db');
-  await db.execAsync('PRAGMA journal_mode = WAL;');
-  await db.execAsync('PRAGMA foreign_keys = ON;');
-  await runMigrations(db);
-  return db;
+async function openDatabase(): Promise<SQLite.SQLiteDatabase> {
+  const database = await SQLite.openDatabaseAsync('wealthlens.db');
+  await database.execAsync('PRAGMA journal_mode = WAL;');
+  await database.execAsync('PRAGMA foreign_keys = ON;');
+  await runMigrations(database);
+  return database;
+}
+
+export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
+  if (!dbPromise) {
+    dbPromise = openDatabase().catch((e) => {
+      dbPromise = null; // allow a retry if init failed
+      throw e;
+    });
+  }
+  return dbPromise;
 }
 
 async function runMigrations(database: SQLite.SQLiteDatabase) {
@@ -25,22 +37,22 @@ async function runMigrations(database: SQLite.SQLiteDatabase) {
 
   if (currentVersion < 1) {
     await database.execAsync(MIGRATION_V1);
-    await database.runAsync('INSERT INTO schema_version (version) VALUES (?)', 1);
+    await database.runAsync('INSERT OR IGNORE INTO schema_version (version) VALUES (?)', 1);
   }
 
   if (currentVersion < 2) {
     await database.execAsync(MIGRATION_V2);
-    await database.runAsync('INSERT INTO schema_version (version) VALUES (?)', 2);
+    await database.runAsync('INSERT OR IGNORE INTO schema_version (version) VALUES (?)', 2);
   }
 
   if (currentVersion < 3) {
     await database.execAsync(MIGRATION_V3);
-    await database.runAsync('INSERT INTO schema_version (version) VALUES (?)', 3);
+    await database.runAsync('INSERT OR IGNORE INTO schema_version (version) VALUES (?)', 3);
   }
 
   if (currentVersion < 4) {
     await database.execAsync(MIGRATION_V4);
-    await database.runAsync('INSERT INTO schema_version (version) VALUES (?)', 4);
+    await database.runAsync('INSERT OR IGNORE INTO schema_version (version) VALUES (?)', 4);
   }
 }
 
@@ -190,9 +202,14 @@ const MIGRATION_V1 = `
 `;
 
 export async function resetDatabase() {
-  if (db) {
-    await db.closeAsync();
-    db = null;
+  if (dbPromise) {
+    try {
+      const database = await dbPromise;
+      await database.closeAsync();
+    } catch {
+      // ignore
+    }
+    dbPromise = null;
   }
   await SQLite.deleteDatabaseAsync('wealthlens.db');
 }
